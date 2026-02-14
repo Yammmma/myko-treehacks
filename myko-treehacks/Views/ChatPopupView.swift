@@ -56,7 +56,7 @@ struct ChatPopupView: View {
                     scrollToBottom(proxy: proxy, animated: true)
                 }
             }
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.4)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.2)
         }
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
@@ -96,8 +96,8 @@ private struct MessageBubble: View {
                 .padding(.vertical, 10)
                 .foregroundStyle(isUser ? Color.white : Color.primary)
                 .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isUser ? MykoColors.coralBase : Color.white.opacity(0.6))
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(isUser ? MykoColors.biologyBase : Color.white.opacity(0.6))
                 )
 
             if !isUser { Spacer(minLength: 30) }

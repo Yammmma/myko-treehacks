@@ -154,16 +154,15 @@ private struct ChatComposerBar: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.bordered)
             .accessibilityLabel("Close chat")
 
             TextField("Ask Myko…", text: $chat.draft)
                 .focused($isFocused)
-                .padding(.vertical, 10)
+                .padding(.vertical, 5)
                 .padding(.horizontal, 12)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color.white.opacity(0.08), in: Capsule())
                 .submitLabel(.send)
                 .onSubmit {
                     chat.send()
@@ -172,7 +171,6 @@ private struct ChatComposerBar: View {
             Button(action: onToggleRecording) {
                 Image(systemName: isRecording ? "stop.fill" : "mic.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.bordered)
             .tint(isRecording ? .red : MykoColors.biologyBase)
@@ -183,16 +181,15 @@ private struct ChatComposerBar: View {
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canSend)
             .accessibilityLabel("Send message")
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .background(.ultraThinMaterial, in: Capsule())
         .overlay(
-            RoundedRectangle(cornerRadius: 22)
+            Capsule()
                 .stroke(Color.white.opacity(0.25), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
