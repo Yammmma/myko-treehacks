@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import ImageIO
 
 struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
@@ -33,13 +32,14 @@ struct HistoryView: View {
                                     HistoryDetailView(item: item)
                                         .environmentObject(appState)
                                 } label: {
-                                    HistoryThumbnailView(item: item)
+                                    HistoryCardView(item: item)
                                         .environmentObject(appState)
+                                        .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(12)
+                        .padding(.horizontal, 12)
                     }
                 }
             }
@@ -48,60 +48,6 @@ struct HistoryView: View {
     }
 }
 
-private struct HistoryThumbnailView: View {
-    @EnvironmentObject private var appState: AppState
-    let item: HistoryItem
-
-    @State private var thumbnail: UIImage?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Group {
-                if let thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    ZStack {
-                        Color.gray.opacity(0.15)
-                        ProgressView()
-                    }
-                }
-            }
-            .frame(height: 140)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .task {
-            if thumbnail == nil {
-                thumbnail = downsampledImage(at: appState.historyStore.imageURL(for: item), maxDimension: 400)
-            }
-        }
-    }
-
-    private func downsampledImage(at url: URL, maxDimension: CGFloat) -> UIImage? {
-        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
-        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else { return nil }
-
-        let downsampleOptions: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension
-        ]
-
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions as CFDictionary) else {
-            return nil
-        }
-
-        return UIImage(cgImage: cgImage)
-    }
-}
 
 private struct HistoryDetailView: View {
     @EnvironmentObject private var appState: AppState
@@ -119,7 +65,7 @@ private struct HistoryDetailView: View {
                 ContentUnavailableView("Image unavailable", systemImage: "photo")
             }
         }
-        .navigationTitle(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+        .navigationTitle(item.title)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

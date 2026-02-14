@@ -255,6 +255,10 @@ private struct CameraPreview: UIViewRepresentable {
                 if session.canAddOutput(videoOutput) {
                     session.addOutput(videoOutput)
                     videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
+                    if let connection = videoOutput.connection(with: .video) {
+                            connection.videoOrientation = .portrait
+                            connection.isVideoMirrored = false
+                        }
                 }
                 
                 self.session.commitConfiguration()
