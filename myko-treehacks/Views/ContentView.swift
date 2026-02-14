@@ -6,12 +6,16 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
+    @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
     @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
 
     @State private var transcriptionError: String?
+    @State private var captureError: String?
+    @State private var showSavedToast = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
