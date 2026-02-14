@@ -16,12 +16,6 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             CameraView()
-                .overlay {
-                    Circle()
-                        .stroke(Color.white.opacity(0.8), lineWidth: 3)
-                        .frame(width: 220, height: 220)
-                        .shadow(color: .black.opacity(0.35), radius: 12)
-                }
 
             VStack(spacing: 12) {
                 Spacer()
