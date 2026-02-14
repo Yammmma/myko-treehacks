@@ -13,7 +13,7 @@ import CoreVideo
 import Combine
 
 // Ensure this matches your ngrok URL exactly
-let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
+let ENDPOINT_URL_BASE = "3ef2-2607-f6d0-d-3553-00-a4.ngrok-free.app"
 
 struct CameraView: View {
     var captureTrigger: Int = 0
@@ -190,6 +190,9 @@ private struct CameraPreview: UIViewRepresentable {
         private let ciContext = CIContext()
         private var pendingSnapshotRequests: [((UIImage?) -> Void)] = []
         
+        private var isWSConnected = false
+        private var pendingMessages: [URLSessionWebSocketTask.Message] = []
+
         // --- Network Properties ---
         private var webSocketTask: URLSessionWebSocketTask?
         var onFrameReceived: ((UIImage) -> Void)?
@@ -210,13 +213,30 @@ private struct CameraPreview: UIViewRepresentable {
         
         // 1. Setup WebSocket
         func setupWebSocket() {
-            guard let url = URL(string: "wss://\(ENDPOINT_URL_BASE)/ws") else {
+            let host = ENDPOINT_URL_BASE
+                .replacingOccurrences(of: "https://", with: "")
+                .replacingOccurrences(of: "http://", with: "")
+
+            guard let url = URL(string: "wss://\(host)/ws") else {
                 print("❌ Invalid WS URL")
                 return
             }
             webSocketTask = URLSession.shared.webSocketTask(with: url)
             webSocketTask?.resume()
             listenForMessages()
+            webSocketTask?.sendPing { [weak self] error in
+                    guard let self else { return }
+                    DispatchQueue.main.async {
+                        if let error {
+                            print("❌ WS Ping failed:", error)
+                            self.isWSConnected = false
+                        } else {
+                            print("✅ WS Connected")
+                            self.isWSConnected = true
+                        }
+                    }
+                }
+
         }
         
         // 2. Recursive Listener with auto-reconnect
