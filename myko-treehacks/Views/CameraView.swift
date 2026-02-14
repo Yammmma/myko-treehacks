@@ -13,7 +13,7 @@ import CoreVideo
 import Combine
 
 // Ensure this matches your ngrok URL exactly
-let ENDPOINT_URL_BASE = "3ef2-2607-f6d0-d-3553-00-a4.ngrok-free.app"
+let ENDPOINT_URL_BASE = "zjwlo-2607-f6d0-d-3553--a4.a.free.pinggy.link"
 
 struct CameraView: View {
     var captureTrigger: Int = 0
