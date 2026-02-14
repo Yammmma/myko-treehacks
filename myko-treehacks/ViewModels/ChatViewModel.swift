@@ -8,6 +8,9 @@
 import Combine
 import Foundation
 
+let sendMessage = PassthroughSubject<String, Never>()
+let receiveMessage = PassthroughSubject<String, Never>()
+
 @MainActor
 final class ChatViewModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
@@ -22,19 +25,15 @@ final class ChatViewModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: trimmed))
         draft = ""
         isSending = true
-
-        Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            messages.append(ChatMessage(role: .myko, text: stubReply(for: trimmed)))
-            isSending = false
-        }
+        sendMessage.send(trimmed)
     }
 
     func clear() {
         messages.removeAll()
     }
-
-    private func stubReply(for prompt: String) -> String {
-        "I heard you say: \(prompt). I can help analyze this sample next."
+    
+    func receivedMessage(_ message: String) {
+        messages.append(ChatMessage(role: .myko, text: message))
+        isSending = false
     }
 }

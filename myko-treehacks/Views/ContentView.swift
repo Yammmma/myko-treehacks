@@ -110,6 +110,9 @@ struct ContentView: View {
         }, message: {
             Text(transcriptionError ?? "Unknown error")
         })
+        .onReceive(receiveMessage) { message in
+            chat.receivedMessage(message)
+        }
     }
 
     @MainActor

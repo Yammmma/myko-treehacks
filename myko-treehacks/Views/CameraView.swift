@@ -1,8 +1,8 @@
 //
-//  CameraView.swift
-//  myko-treehacks
+//    CameraView.swift
+//    myko-treehacks
 //
-//  Created by Yuma Soerianto on 2/13/26.
+//    Created by Yuma Soerianto on 2/13/26.
 //
 
 import SwiftUI
@@ -10,17 +10,18 @@ import AVFoundation
 import UIKit
 import CoreImage
 import CoreVideo
+import Combine
 
+// Ensure this matches your ngrok URL exactly
 let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
 
 struct CameraView: View {
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
-    @State private var showSettingsAlert = false
     
     @State private var currentZoom = 0.0
     @State private var totalZoom = 1.0
     @State private var capturedImage: UIImage?
-    @State private var isCapturing = false
+    @State private var pendingPrompt = ""
     
     @State private var annotatedImage: UIImage?
     
@@ -28,18 +29,9 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, isCapturing: $isCapturing)
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt)
                     .ignoresSafeArea()
                     .clipShape(Circle())
-                    .overlay(alignment: .bottom) {
-                        Button(action: { isCapturing = true }) {
-                            Image(systemName: "circle.inset.filled")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.white)
-                                .shadow(radius: 4)
-                                .padding(24)
-                        }
-                    }
                     .overlay {
                         if let image = annotatedImage {
                             Image(uiImage: image)
@@ -97,6 +89,9 @@ struct CameraView: View {
                     currentZoom = 0
                 }
         )
+        .onReceive(sendMessage) { message in
+            pendingPrompt = message
+        }
     }
     
     private func requestAccess() {
@@ -122,7 +117,7 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var totalZoom: Double
     @Binding var capturedImage: UIImage?
     @Binding var annotatedImage: UIImage?
-    @Binding var isCapturing: Bool
+    @Binding var pendingPrompt: String
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -136,9 +131,9 @@ private struct CameraPreview: UIViewRepresentable {
             self.annotatedImage = image
         }
         
-        // Continuous capture loop (15 FPS)
+        // Continuous capture loop (15 FPS) for WebSocket Streaming
         Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { _ in
-            captureImage(context: context)
+            captureImage(context: context, mode: .stream)
         }
         
         return view
@@ -147,25 +142,33 @@ private struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         
-        // Handle manual capture trigger
-        if isCapturing {
-            if let img = capturedImage {
-                context.coordinator.sendFrame(image: img)
-            }
+        // Handle manual capture trigger (HTTP Query)
+        if pendingPrompt != "" {
+            captureImage(context: context, mode: .query)
             DispatchQueue.main.async {
-                self.isCapturing = false
+                self.pendingPrompt = ""
             }
         }
     }
     
-    func captureImage(context: Context) {
+    enum CaptureMode {
+        case stream // WebSocket
+        case query    // HTTP POST
+    }
+    
+    func captureImage(context: Context, mode: CaptureMode) {
         context.coordinator.requestSnapshot { image in
+            guard let img = image else { return }
+            
             DispatchQueue.main.async {
-                self.capturedImage = image
-                // Automatically send frame for real-time tracking
-                if let img = image {
-                    context.coordinator.sendFrame(image: img)
-                }
+                self.capturedImage = img
+            }
+            
+            // Route based on mode
+            if mode == .stream {
+                context.coordinator.sendFrameWS(image: img)
+            } else {
+                context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
             }
         }
     }
@@ -174,7 +177,7 @@ private struct CameraPreview: UIViewRepresentable {
         Coordinator()
     }
     
-    // MARK: - Coordinator (Handles Camera & WebSocket)
+    // MARK: - Coordinator (Handles Camera & Network)
     
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // --- Camera Properties ---
@@ -187,7 +190,7 @@ private struct CameraPreview: UIViewRepresentable {
         private let ciContext = CIContext()
         private var pendingSnapshotRequest: ((UIImage?) -> Void)?
         
-        // --- WebSocket Properties ---
+        // --- Network Properties ---
         private var webSocketTask: URLSessionWebSocketTask?
         var onFrameReceived: ((UIImage) -> Void)?
         
@@ -195,19 +198,27 @@ private struct CameraPreview: UIViewRepresentable {
             let frame: String
         }
         
-        // 1. Setup
+        struct InferenceHTTPSchema: Codable {
+            let prompt: String
+            let frame: String
+        }
+        
+        struct InferenceHTTPResponse: Codable {
+            let response: String
+        }
+        
+        // 1. Setup WebSocket
         func setupWebSocket() {
             guard let url = URL(string: "wss://\(ENDPOINT_URL_BASE)/ws") else {
-                print("❌ Invalid URL")
+                print("❌ Invalid WS URL")
                 return
             }
             webSocketTask = URLSession.shared.webSocketTask(with: url)
             webSocketTask?.resume()
-            print("⚡ WebSocket Connecting...")
             listenForMessages()
         }
         
-        // 2. Recursive Listener (Crucial for Stream)
+        // 2. Recursive Listener
         private func listenForMessages() {
             webSocketTask?.receive { [weak self] result in
                 guard let self = self else { return }
@@ -215,12 +226,9 @@ private struct CameraPreview: UIViewRepresentable {
                 switch result {
                 case .success(let message):
                     self.handleMessage(message)
-                    // RECURSION: Keep listening!
-                    self.listenForMessages()
-                    
+                    self.listenForMessages() // Recursion
                 case .failure(let error):
                     print("❌ WebSocket Receive Error: \(error)")
-                    // Optional: logic to reconnect could go here
                 }
             }
         }
@@ -229,49 +237,79 @@ private struct CameraPreview: UIViewRepresentable {
         private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
             switch message {
             case .string(let imageB64):
-                // Sanitize: Remove newlines, whitespace, and quotes
                 var sanitized = imageB64.trimmingCharacters(in: .whitespacesAndNewlines)
                                         .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
                 
-                // Remove 'data:image/jpeg;base64,' prefix if present
                 if let commaRange = sanitized.range(of: ",") {
                     sanitized = String(sanitized[commaRange.upperBound...])
                 }
                 
                 if let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters),
-                   let image = UIImage(data: imageData) {
+                    let image = UIImage(data: imageData) {
                     DispatchQueue.main.async { self.onFrameReceived?(image) }
-                } else {
-                    print("⚠️ Failed to decode Base64 string")
                 }
-                
             case .data(let data):
                 if let image = UIImage(data: data) {
                     DispatchQueue.main.async { self.onFrameReceived?(image) }
                 }
-            @unknown default:
-                break
+            @unknown default: break
             }
         }
         
-        // 4. Send Frame
-        func sendFrame(image: UIImage) {
+        // 4. Send Frame (WebSocket)
+        func sendFrameWS(image: UIImage) {
             guard let frameB64 = image.base64EncodedString() else { return }
-            
-            // Construct JSON payload
             let schema = InferenceWSSchema(frame: frameB64)
             
             do {
                 let jsonData = try JSONEncoder().encode(schema)
                 let message = URLSessionWebSocketTask.Message.data(jsonData)
-                
                 webSocketTask?.send(message) { error in
-                    if let error = error {
-                        print("❌ Error sending frame: \(error)")
-                    }
+                    if let error = error { print("❌ WS Send Error: \(error)") }
                 }
             } catch {
-                print("❌ JSON Encoding Error: \(error)")
+                print("❌ JSON Error: \(error)")
+            }
+        }
+        
+        // 5. Make Inference (HTTP POST) - RESTORED
+        func makeInferenceHTTP(prompt: String, image: UIImage) {
+            guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return }
+            guard let frameB64 = image.base64EncodedString() else { return }
+            
+            let post = InferenceHTTPSchema(
+                prompt: prompt,
+                frame: frameB64
+            )
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            do {
+                let jsonData = try JSONEncoder().encode(post)
+                request.httpBody = jsonData
+                
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        print("❌ HTTP Error: \(error.localizedDescription)")
+                        return
+                    }
+                    if let data = data {
+                        Task { @MainActor in
+                            do {
+                                let result = try JSONDecoder().decode(InferenceHTTPResponse.self, from: data)
+                                receiveMessage.send(result.response)
+                            } catch {
+                                print("❌ HTTP Decoding Error: \(error)")
+                            }
+                        }
+                    }
+                }
+                
+                task.resume()
+            } catch {
+                print("❌ HTTP Encoding Error: \(error)")
             }
         }
         
@@ -288,8 +326,8 @@ private struct CameraPreview: UIViewRepresentable {
                     ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
                 
                 guard let device = selectedDevice,
-                      let input = try? AVCaptureDeviceInput(device: device),
-                      self.session.canAddInput(input) else {
+                        let input = try? AVCaptureDeviceInput(device: device),
+                        self.session.canAddInput(input) else {
                     self.session.commitConfiguration()
                     return
                 }
@@ -364,7 +402,7 @@ private struct CameraPreview: UIViewRepresentable {
             pendingSnapshotRequest = nil
             
             guard let cg = cgImage(from: sampleBuffer),
-                  let masked = circularMaskedImage(from: cg) else {
+                    let masked = circularMaskedImage(from: cg) else {
                 requester(nil)
                 return
             }
@@ -386,19 +424,16 @@ private struct CameraPreview: UIViewRepresentable {
 
 private final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-    
     var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     
     override init(frame: CGRect) {
         super.init(frame: frame)
         commonInit()
     }
-    
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         commonInit()
     }
-    
     private func commonInit() {
         videoPreviewLayer.videoGravity = .resizeAspect
     }
@@ -408,8 +443,7 @@ extension UIImage {
     func base64EncodedString() -> String? {
         guard let imageData = self.jpegData(compressionQuality: 0.5) else { return nil }
         let base64String = imageData.base64EncodedString(options: [])
-        // IMPORTANT: Python server expects "data:image..." or just base64 depending on configuration.
-        // Based on your last error, it is safer to send the prefix so Agent.py is happy.
+        // IMPORTANT: Sending Data URI prefix for compatibility
         return "data:image/jpeg;base64,\(base64String)"
     }
 }
