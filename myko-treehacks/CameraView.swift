@@ -133,7 +133,7 @@ private struct CameraPreview: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self.capturedImage = image
                     self.isCapturing = false
-                    self.makeInference()
+//                    self.makeInference()
                 }
             }
         }
@@ -211,7 +211,7 @@ private struct CameraPreview: UIViewRepresentable {
                 self.session.beginConfiguration()
                 self.session.sessionPreset = .high
 
-                // Input: Rear wide angle camera
+                // Input: Rear telephoto
                 guard let device = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
                       let input = try? AVCaptureDeviceInput(device: device),
                       self.session.canAddInput(input) else {
