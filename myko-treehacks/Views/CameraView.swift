@@ -1,3 +1,10 @@
+//
+//    CameraView.swift
+//    myko-treehacks
+//
+//    Created by Yuma Soerianto on 2/13/26.
+//
+
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -9,6 +16,8 @@ import Combine
 let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
 
 struct CameraView: View {
+    var captureTrigger: Int = 0
+    var onCapture: ((UIImage) -> Void)? = nil
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     
     @State private var currentZoom = 0.0
@@ -22,8 +31,7 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt)
-                    .ignoresSafeArea()
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt, captureTrigger: captureTrigger, onCapture: onCapture)                    .ignoresSafeArea()
                     .clipShape(Circle())
                     .overlay {
                         if let image = annotatedImage {
@@ -111,6 +119,8 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var capturedImage: UIImage?
     @Binding var annotatedImage: UIImage?
     @Binding var pendingPrompt: String
+    let captureTrigger: Int
+    let onCapture: ((UIImage) -> Void)?
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
