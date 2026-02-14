@@ -35,6 +35,7 @@ struct myko_treehacksApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var isOnboardingPresented = true
     
     var body: some View {
         TabView(selection: $appState.selectedTab) {
@@ -45,6 +46,9 @@ struct RootView: View {
             HomeView()
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(AppState.Tab.home)
+        }
+        .fullScreenCover(isPresented: $isOnboardingPresented) {
+            OnboardingView(isPresented: $isOnboardingPresented)
         }
     }
     init() {

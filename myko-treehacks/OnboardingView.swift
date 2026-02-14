@@ -3,7 +3,7 @@ import AVFoundation
 
 struct OnboardingView: View {
     @Binding var isPresented: Bool
-    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
+//    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
 
     @State private var currentPage = 0
     @State private var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -12,7 +12,7 @@ struct OnboardingView: View {
     var body: some View {
         TabView(selection: $currentPage) {
             OnboardingPage(
-                imageName: "aqi.medium",
+                imageName: "myko-position3",
                 title: "AI Microscopy in Your Pocket",
                 body1: "Capture and analyze microscopic samples instantly with on-device intelligence.",
                 buttonTitle: "Continue",
@@ -22,7 +22,7 @@ struct OnboardingView: View {
             )
 
             OnboardingPage(
-                imageName: "camera.viewfinder",
+                imageName: "myko-position3",
                 title: "Camera Access Required",
                 body1: "Myko uses your camera to capture microscope images for analysis.",
                 buttonTitle: cameraButtonTitle,
@@ -32,7 +32,7 @@ struct OnboardingView: View {
             )
 
             OnboardingPage(
-                imageName: "waveform.and.mic",
+                imageName: "myko-position2",
                 title: "Voice Dictation (Optional)",
                 body1: "Use your voice to describe samples and add notes hands-free.",
                 buttonTitle: micButtonTitle,
@@ -44,7 +44,7 @@ struct OnboardingView: View {
             )
 
             OnboardingPage(
-                imageName: "checkmark.seal",
+                imageName: "myko-position3",
                 title: "You’re Ready to Scan",
                 body1: "Place your sample under the microscope and tap Scan to begin.",
                 buttonTitle: "Start Using Myko",
@@ -123,7 +123,7 @@ struct OnboardingView: View {
     }
 
     private func completeOnboarding() {
-        hasSeenOnboarding = true
+//        hasSeenOnboarding = true
         isPresented = false
     }
 }
