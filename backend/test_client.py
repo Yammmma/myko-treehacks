@@ -15,7 +15,7 @@ except FileNotFoundError:
 # 2. Send the Request
 url = "http://localhost:8000/query"
 payload = {
-    "query": "What is in this image?",
+    "prompt": "What is in this image?",
     "frame": b64_string
 }
 

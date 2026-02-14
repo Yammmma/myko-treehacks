@@ -125,9 +125,10 @@ private struct CameraPreview: UIViewRepresentable {
         }
         
         // Continuous capture loop (15 FPS) for WebSocket Streaming
-        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { _ in
-            captureImage(context: context, mode: .stream)
+        let timer = Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { _ in
+            self.captureAndStreamFrame(context: context)
         }
+        context.coordinator.streamingTimer = timer
         
         return view
     }
@@ -136,33 +137,29 @@ private struct CameraPreview: UIViewRepresentable {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         
         // Handle manual capture trigger (HTTP Query)
-        if pendingPrompt != "" {
-            captureImage(context: context, mode: .query)
+        if !pendingPrompt.isEmpty {
+            // Capture the prompt value NOW before the async snapshot clears it
+            let promptToSend = pendingPrompt
+            context.coordinator.requestSnapshot { image in
+                guard let img = image else { return }
+                DispatchQueue.main.async {
+                    self.capturedImage = img
+                }
+                context.coordinator.makeInferenceHTTP(prompt: promptToSend, image: img)
+            }
             DispatchQueue.main.async {
                 self.pendingPrompt = ""
             }
         }
     }
     
-    enum CaptureMode {
-        case stream // WebSocket
-        case query    // HTTP POST
-    }
-    
-    func captureImage(context: Context, mode: CaptureMode) {
+    func captureAndStreamFrame(context: Context) {
         context.coordinator.requestSnapshot { image in
             guard let img = image else { return }
-            
             DispatchQueue.main.async {
                 self.capturedImage = img
             }
-            
-            // Route based on mode
-            if mode == .stream {
-                context.coordinator.sendFrameWS(image: img)
-            } else {
-                context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
-            }
+            context.coordinator.sendFrameWS(image: img)
         }
     }
     
@@ -186,6 +183,7 @@ private struct CameraPreview: UIViewRepresentable {
         // --- Network Properties ---
         private var webSocketTask: URLSessionWebSocketTask?
         var onFrameReceived: ((UIImage) -> Void)?
+        var streamingTimer: Timer?
         
         struct InferenceWSSchema: Codable {
             let frame: String
@@ -211,7 +209,7 @@ private struct CameraPreview: UIViewRepresentable {
             listenForMessages()
         }
         
-        // 2. Recursive Listener
+        // 2. Recursive Listener with auto-reconnect
         private func listenForMessages() {
             webSocketTask?.receive { [weak self] result in
                 guard let self = self else { return }
@@ -221,7 +219,10 @@ private struct CameraPreview: UIViewRepresentable {
                     self.handleMessage(message)
                     self.listenForMessages() // Recursion
                 case .failure(let error):
-                    print("❌ WebSocket Receive Error: \(error)")
+                    print("❌ WebSocket Receive Error: \(error). Reconnecting...")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        self.setupWebSocket()
+                    }
                 }
             }
         }
@@ -249,14 +250,15 @@ private struct CameraPreview: UIViewRepresentable {
             }
         }
         
-        // 4. Send Frame (WebSocket)
+        // 4. Send Frame (WebSocket) — send as text for maximum proxy compatibility
         func sendFrameWS(image: UIImage) {
             guard let frameB64 = image.base64EncodedString() else { return }
             let schema = InferenceWSSchema(frame: frameB64)
             
             do {
                 let jsonData = try JSONEncoder().encode(schema)
-                let message = URLSessionWebSocketTask.Message.data(jsonData)
+                guard let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+                let message = URLSessionWebSocketTask.Message.string(jsonString)
                 webSocketTask?.send(message) { error in
                     if let error = error { print("❌ WS Send Error: \(error)") }
                 }
@@ -404,6 +406,8 @@ private struct CameraPreview: UIViewRepresentable {
         }
         
         deinit {
+            streamingTimer?.invalidate()
+            streamingTimer = nil
             webSocketTask?.cancel(with: .normalClosure, reason: nil)
             if deviceLockAcquired {
                 device?.unlockForConfiguration()
