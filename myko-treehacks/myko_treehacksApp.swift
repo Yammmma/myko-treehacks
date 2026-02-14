@@ -10,7 +10,6 @@ import SwiftData
 
 @main
 struct myko_treehacksApp: App {
-<<<<<<< HEAD
     @StateObject private var appState = AppState()
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -46,17 +45,9 @@ struct RootView: View {
             HomeView()
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(AppState.Tab.home)
-            
-=======
+        }
+    }
     init() {
         UIApplication.shared.isIdleTimerDisabled = true
-    }
-    
-    var body: some Scene {
-        WindowGroup {
-//            ContentView()
-            CameraView()
->>>>>>> camera-feed
-        }
     }
 }
