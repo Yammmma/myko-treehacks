@@ -11,7 +11,8 @@ import SwiftUI
 struct myko_treehacksApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+//            ContentView()
+            CameraView()
         }
     }
 }
