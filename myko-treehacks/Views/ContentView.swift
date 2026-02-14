@@ -20,8 +20,10 @@ struct ContentView: View {
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            CameraView()
-            
+            CameraView(
+                captureTrigger: captureTrigger,
+                onCapture: handleCapturedImage
+            )
             VStack(spacing: 12) {
                 Spacer()
                 

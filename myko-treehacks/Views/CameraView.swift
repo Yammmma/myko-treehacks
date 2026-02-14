@@ -1,3 +1,10 @@
+//
+//    CameraView.swift
+//    myko-treehacks
+//
+//    Created by Yuma Soerianto on 2/13/26.
+//
+
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -9,6 +16,8 @@ import Combine
 let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
 
 struct CameraView: View {
+    var captureTrigger: Int = 0
+    var onCapture: ((UIImage) -> Void)? = nil
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     
     @State private var currentZoom = 0.0
@@ -22,8 +31,7 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt)
-                    .ignoresSafeArea()
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt, captureTrigger: captureTrigger, onCapture: onCapture)                    .ignoresSafeArea()
                     .clipShape(Circle())
                     .overlay {
                         if let image = annotatedImage {
@@ -111,6 +119,8 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var capturedImage: UIImage?
     @Binding var annotatedImage: UIImage?
     @Binding var pendingPrompt: String
+    let captureTrigger: Int
+    let onCapture: ((UIImage) -> Void)?
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -135,7 +145,11 @@ private struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         
-        // Handle manual capture trigger (HTTP Query)
+        // Handle manual capture trigger (save screenshot + HTTP Query when prompt exists)
+        if context.coordinator.lastHandledCaptureTrigger != captureTrigger {
+            context.coordinator.lastHandledCaptureTrigger = captureTrigger
+            captureImage(context: context, mode: .manualCapture)
+        }
         if pendingPrompt != "" {
             captureImage(context: context, mode: .query)
             DispatchQueue.main.async {
@@ -146,7 +160,8 @@ private struct CameraPreview: UIViewRepresentable {
     
     enum CaptureMode {
         case stream // WebSocket
-        case query    // HTTP POST
+        case query // HTTP POST
+        case manualCapture
     }
     
     func captureImage(context: Context, mode: CaptureMode) {
@@ -158,10 +173,13 @@ private struct CameraPreview: UIViewRepresentable {
             }
             
             // Route based on mode
-            if mode == .stream {
+            switch mode {
+            case .stream:
                 context.coordinator.sendFrameWS(image: img)
-            } else {
+            case .query:
                 context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
+            case .manualCapture:
+                onCapture?(img)
             }
         }
     }
@@ -186,6 +204,7 @@ private struct CameraPreview: UIViewRepresentable {
         // --- Network Properties ---
         private var webSocketTask: URLSessionWebSocketTask?
         var onFrameReceived: ((UIImage) -> Void)?
+        var lastHandledCaptureTrigger: Int = 0
         
         struct InferenceWSSchema: Codable {
             let frame: String
