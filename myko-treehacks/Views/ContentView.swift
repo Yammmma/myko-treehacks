@@ -152,11 +152,12 @@ private struct ChatComposerBar: View {
             .buttonStyle(.bordered)
             .accessibilityLabel("Close chat")
 
-            TextField("Ask Myko…", text: $chat.draft)
+            TextField("Ask Myko…", text: $chat.draft, axis: .vertical)
                 .focused($isFocused)
                 .padding(.vertical, 5)
                 .padding(.horizontal, 12)
-                .background(Color.white.opacity(0.08), in: Capsule())
+                .background(Color.clear)
+                .lineLimit(1...4)
                 .submitLabel(.send)
                 .onSubmit {
                     chat.send()
