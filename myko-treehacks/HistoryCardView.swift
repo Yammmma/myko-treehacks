@@ -21,7 +21,9 @@ struct HistoryCardView: View {
                 if let thumbnail {
                     Image(uiImage: thumbnail)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.gray.opacity(0.12))
                 } else {
                     ZStack {
                         Color.gray.opacity(0.12)
@@ -29,8 +31,7 @@ struct HistoryCardView: View {
                     }
                 }
             }
-            .frame(height: 140)
-            .clipped()
+            .frame(height: 150)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             Text(item.title)
@@ -43,6 +44,7 @@ struct HistoryCardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, minHeight: 230, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(
