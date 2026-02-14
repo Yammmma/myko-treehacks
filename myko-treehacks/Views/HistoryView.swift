@@ -36,15 +36,14 @@ struct HistoryView: View {
                 return $0.createdAt > $1.createdAt
             }
         case .favorites:
-            return items.sorted {
-                if $0.isFavorite != $1.isFavorite {
-                    return $0.isFavorite && !$1.isFavorite
+            return items
+                .filter { $0.isFavorite }
+                .sorted {
+                    if $0.createdAt == $1.createdAt {
+                        return $0.id.uuidString > $1.id.uuidString
+                    }
+                    return $0.createdAt > $1.createdAt
                 }
-                if $0.createdAt == $1.createdAt {
-                    return $0.id.uuidString > $1.id.uuidString
-                }
-                return $0.createdAt > $1.createdAt
-            }
         }
     }
 
