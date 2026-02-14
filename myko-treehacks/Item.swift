@@ -1,3 +1,11 @@
+//
+//  Item.swift
+//  myko-treehacks
+//
+//  Created by Amy Sun Key on 2/13/26.
+//
+
+
 import Foundation
 import SwiftData
 

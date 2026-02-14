@@ -9,8 +9,22 @@ import SwiftUI
 
 struct HomeView: View {
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        NavigationStack {
+            VStack(spacing: 20) {
+                Text("Home")
+                    .font(.title)
+                
+                NavigationLink("Go to Content") {
+                    ContentView()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .navigationTitle("Home")
+        }
+        
     }
+    //.navigationTitle("Home")
 }
 
 #Preview {
