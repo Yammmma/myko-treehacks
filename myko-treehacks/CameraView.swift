@@ -17,11 +17,14 @@ struct CameraView: View {
     @State private var totalZoom = 1.0
 
     var body: some View {
-        Group {
+        ZStack {
             switch authorizationStatus {
             case .authorized:
                 CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom)
-                    .ignoresSafeArea()
+                      .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      .ignoresSafeArea()
+                      .clipShape(Circle())
+                      .padding()
             case .notDetermined:
                 VStack(spacing: 16) {
                     Text("Camera Access Required")
@@ -57,6 +60,10 @@ struct CameraView: View {
         }
         .onAppear {
             authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
         .gesture(
             MagnifyGesture()
@@ -99,7 +106,6 @@ private struct CameraPreview: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-//        uiView.videoPreviewLayer.contentsScale = currentZoom + totalZoom
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
     }
 
@@ -121,7 +127,7 @@ private struct CameraPreview: UIViewRepresentable {
                 self.session.sessionPreset = .high
 
                 // Input: Rear wide angle camera
-                guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                guard let device = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
                       let input = try? AVCaptureDeviceInput(device: device),
                       self.session.canAddInput(input) else {
                     self.session.commitConfiguration()
@@ -150,7 +156,6 @@ private struct CameraPreview: UIViewRepresentable {
             let clampedZoom = min(max(zoom, 1), device?.activeFormat.videoMaxZoomFactor ?? 1)
             
             device?.videoZoomFactor = clampedZoom
-//            previewView.videoPreviewLayer.contentsScale = zoom
         }
 
         deinit {
