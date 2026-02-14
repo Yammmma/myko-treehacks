@@ -37,15 +37,13 @@ struct HistoryCardView: View {
                     appState.historyStore.toggleFavorite(for: item)
                 } label: {
                     Image(systemName: item.isFavorite ? "star.fill" : "star")
-                        .font(.headline)
-                        .foregroundStyle(item.isFavorite ? .yellow : .white)
-                        .padding(8)
-                        .background(.black.opacity(0.6), in: Circle())
+                        .foregroundStyle(item.isFavorite ? .yellow : .black)
+                        .padding(4)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
                 .highPriorityGesture(TapGesture())
-                .padding(8)
+                .padding(4)
             }
             .frame(height: 150)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

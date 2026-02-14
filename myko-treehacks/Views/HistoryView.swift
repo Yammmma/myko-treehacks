@@ -126,6 +126,7 @@ private struct HistoryDetailView: View {
                         appState.historyStore.toggleFavorite(for: item)
                     } label: {
                         Image(systemName: item.isFavorite ? "star.fill" : "star")
+                            .foregroundStyle(item.isFavorite ? .yellow : .primary)
                     }
                     .buttonStyle(.plain)
                 }

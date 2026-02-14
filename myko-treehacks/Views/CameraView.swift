@@ -188,7 +188,7 @@ private struct CameraPreview: UIViewRepresentable {
         private let videoOutput = AVCaptureVideoDataOutput()
         private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
         private let ciContext = CIContext()
-        private var pendingSnapshotRequest: ((UIImage?) -> Void)?
+        private var pendingSnapshotRequests: [((UIImage?) -> Void)] = []
         
         // --- Network Properties ---
         private var webSocketTask: URLSessionWebSocketTask?
@@ -366,7 +366,9 @@ private struct CameraPreview: UIViewRepresentable {
         }
         
         func requestSnapshot(completion: @escaping (UIImage?) -> Void) {
-            pendingSnapshotRequest = completion
+            outputQueue.async { [weak self] in
+                self?.pendingSnapshotRequests.append(completion)
+            }
         }
         
         private func cgImage(from sampleBuffer: CMSampleBuffer) -> CGImage? {
@@ -403,16 +405,17 @@ private struct CameraPreview: UIViewRepresentable {
         }
         
         func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-            guard let requester = pendingSnapshotRequest else { return }
-            pendingSnapshotRequest = nil
+            guard !pendingSnapshotRequests.isEmpty else { return }
+            let requesters = pendingSnapshotRequests
+            pendingSnapshotRequests.removeAll()
             
             guard let cg = cgImage(from: sampleBuffer),
                     let masked = circularMaskedImage(from: cg) else {
-                requester(nil)
+                requesters.forEach { $0(nil) }
                 return
             }
             let uiImage = UIImage(cgImage: masked)
-            requester(uiImage)
+            requesters.forEach { $0(uiImage) }
         }
         
         deinit {
