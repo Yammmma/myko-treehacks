@@ -7,16 +7,20 @@
 
 import SwiftUI
 import UIKit
+import Combine
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
     @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
+    @StateObject private var handsFreeController = HandsFreeModeController()
     
     @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
     @State private var captureTrigger = 0
+    @State private var handsFreeEnabled = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -53,6 +57,39 @@ struct ContentView: View {
                     .overlay(Capsule().stroke(Color.white.opacity(0.28), lineWidth: 1))
                     .padding(.bottom, chat.isChatExpanded ? 88 : 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            VStack {
+                HStack {
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .onChange(of: handsFreeEnabled) { _, enabled in
+                                handsFreeController.updateMode(
+                                    enabled: enabled,
+                                    appIsForegrounded: scenePhase == .active,
+                                    onExecute: runHandsFreeCommand
+                                )
+                            }
+                        
+                        Text(handsFreeController.statusText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                
+                Spacer()
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chat.isChatExpanded)
@@ -136,8 +173,11 @@ struct ContentView: View {
         .onReceive(receiveMessage) { message in
             chat.receivedMessage(message)
         }
+        .onChange(of: scenePhase) { _, phase in
+            handsFreeController.updateForegroundState(isForegrounded: phase == .active)
+        }
+
     }
-    
     @MainActor
     private func handleCapturedImage(_ image: UIImage) {
         do {
@@ -156,6 +196,10 @@ struct ContentView: View {
     
     @MainActor
     private func toggleRecording() async {
+        if handsFreeEnabled {
+            handsFreeEnabled = false
+            await handsFreeController.stopAllListening()
+        }
         if transcriptionService.isRecording {
             await transcriptionService.stopRecording()
             return
@@ -170,6 +214,15 @@ struct ContentView: View {
         } catch {
             transcriptionError = error.localizedDescription
         }
+    }
+    @MainActor
+    private func runHandsFreeCommand(_ command: String) {
+        withAnimation(.spring()) {
+            chat.isChatExpanded = true
+        }
+        
+        chat.draft = command
+        chat.send()
     }
 }
 
