@@ -18,6 +18,7 @@ struct HistoryView: View {
     }
 
     @State private var sortMode: SortMode = .newest
+    @State private var selectedItem: HistoryItem?
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -60,15 +61,15 @@ struct HistoryView: View {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(sortedItems) { item in
-                                NavigationLink {
-                                    HistoryDetailView(item: item)
-                                        .environmentObject(appState)
-                                } label: {
-                                    HistoryCardView(item: item)
-                                        .environmentObject(appState)
-                                        .frame(maxWidth: .infinity)
+                                HistoryCardView(item: item) {
+                                    appState.historyStore.toggleFavorite(for: item)
                                 }
-                                .buttonStyle(.plain)
+                                .environmentObject(appState)
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedItem = item
+                                }
                             }
                         }
                         .padding(.horizontal, 12)
@@ -76,6 +77,10 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
+            .navigationDestination(item: $selectedItem) { item in
+                HistoryDetailView(item: item)
+                    .environmentObject(appState)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Picker("Sort", selection: $sortMode) {
