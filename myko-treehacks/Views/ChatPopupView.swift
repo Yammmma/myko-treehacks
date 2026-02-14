@@ -13,33 +13,11 @@ struct ChatPopupView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            HStack {
-                Text("Myko")
-                    .font(.headline)
-
-                Spacer()
-
-                if !chat.messages.isEmpty {
-                    Button("Clear") {
-                        chat.clear()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            Divider()
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        if chat.messages.isEmpty {
-                            Text("Ask Myko anything about what you're seeing.")
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 22)
-                        } else {
+                        if !chat.messages.isEmpty {
                             ForEach(chat.messages) { message in
                                 MessageBubble(message: message)
                                     .id(message.id)
@@ -58,7 +36,8 @@ struct ChatPopupView: View {
             }
             .frame(maxHeight: UIScreen.main.bounds.height * 0.2)
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // Keep the container fully transparent so only message bubbles are visible.
+        .background(.clear)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.3), lineWidth: 1)
