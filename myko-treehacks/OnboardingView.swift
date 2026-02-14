@@ -12,7 +12,7 @@ struct OnboardingView: View {
     var body: some View {
         TabView(selection: $currentPage) {
             OnboardingPage(
-                imageName: "myko-position3",
+                imageName: "myko-micro",
                 title: "AI Microscopy in Your Pocket",
                 body1: "Capture and analyze microscopic samples instantly with on-device intelligence.",
                 buttonTitle: "Continue",
@@ -20,9 +20,10 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: advancePage
             )
+            .tag(0)
 
             OnboardingPage(
-                imageName: "myko-position3",
+                imageName: "myko-position1",
                 title: "Camera Access Required",
                 body1: "Myko uses your camera to capture microscope images for analysis.",
                 buttonTitle: cameraButtonTitle,
@@ -30,10 +31,11 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: handleCameraAction
             )
+            .tag(1)
 
             OnboardingPage(
                 imageName: "myko-position2",
-                title: "Voice Dictation (Optional)",
+                title: "Voice Dictation",
                 body1: "Use your voice to describe samples and add notes hands-free.",
                 buttonTitle: micButtonTitle,
                 pageIndex: 2,
@@ -42,6 +44,7 @@ struct OnboardingView: View {
                 secondaryActionTitle: "Skip for now",
                 secondaryAction: advancePage
             )
+            .tag(2)
 
             OnboardingPage(
                 imageName: "myko-position3",
@@ -52,8 +55,9 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: completeOnboarding
             )
+            .tag(3)
         }
-        .tabViewStyle(.page(indexDisplayMode: .always))
+        .tabViewStyle(.page(indexDisplayMode: .never))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
         .background(Color(.systemBackground))
         .onAppear {
@@ -145,11 +149,10 @@ private struct OnboardingPage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Image(systemName: imageName)
+            Image(imageName)
                 .resizable()
                 .scaledToFit()
                 .frame(maxHeight: 260)
-                .foregroundStyle(MykoColors.leafBase)
                 .opacity(animateImage ? 1 : 0)
                 .offset(y: animateImage ? 0 : 12)
                 .padding(.horizontal, 24)
