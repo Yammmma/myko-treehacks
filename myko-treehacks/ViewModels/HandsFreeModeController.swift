@@ -23,9 +23,16 @@ final class HandsFreeModeController: ObservableObject {
     private var service = SpeechAnalyzerTranscriptionService()
     private var silenceTask: Task<Void, Never>?
     private var commandBuffer = ""
+    private var onCommandUpdate: ((String) -> Void)?
     private var executeCommand: ((String) -> Void)?
 
-    func updateMode(enabled: Bool, appIsForegrounded: Bool, onExecute: @escaping (String) -> Void) {
+    func updateMode(
+        enabled: Bool,
+        appIsForegrounded: Bool,
+        onCommandUpdate: @escaping (String) -> Void,
+        onExecute: @escaping (String) -> Void
+    ) {
+        self.onCommandUpdate = onCommandUpdate
         executeCommand = onExecute
 
         guard enabled != isEnabled || (!enabled && (isArmed || isCapturingCommand)) else {
@@ -58,6 +65,7 @@ final class HandsFreeModeController: ObservableObject {
         silenceTask?.cancel()
         silenceTask = nil
         commandBuffer = ""
+        onCommandUpdate?("")
 
         if service.isRecording {
             await service.stopRecording()
@@ -90,6 +98,7 @@ final class HandsFreeModeController: ObservableObject {
         guard let range = normalized.range(of: wakePhrase) else { return }
 
         let suffix = String(transcript[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[HandsFree] Wake phrase heard: \(wakePhrase). Transcript: \(transcript)")
 
         Task {
             await service.stopRecording()
@@ -105,11 +114,13 @@ final class HandsFreeModeController: ObservableObject {
         commandBuffer = initialText
         isCapturingCommand = true
         statusText = "Listening for command…"
+        onCommandUpdate?(commandBuffer)
 
         do {
             try await service.startRecording { [weak self] transcript in
                 guard let self else { return }
                 self.commandBuffer = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.onCommandUpdate?(self.commandBuffer)
                 self.restartSilenceTimer()
             }
 
@@ -147,6 +158,8 @@ final class HandsFreeModeController: ObservableObject {
         if !command.isEmpty {
             statusText = "Executing: \"\(command)\""
             executeCommand?(command)
+        } else {
+            onCommandUpdate?("")
         }
 
         await armWakeListening()

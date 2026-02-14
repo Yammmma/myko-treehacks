@@ -70,6 +70,7 @@ struct ContentView: View {
                                 handsFreeController.updateMode(
                                     enabled: enabled,
                                     appIsForegrounded: scenePhase == .active,
+                                    onCommandUpdate: updateHandsFreeDraft,
                                     onExecute: runHandsFreeCommand
                                 )
                             }
@@ -176,7 +177,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             handsFreeController.updateForegroundState(isForegrounded: phase == .active)
         }
-
+        
     }
     @MainActor
     private func handleCapturedImage(_ image: UIImage) {
@@ -215,14 +216,24 @@ struct ContentView: View {
             transcriptionError = error.localizedDescription
         }
     }
+    
+    @MainActor
+    private func updateHandsFreeDraft(_ transcript: String) {
+        withAnimation(.spring()) {
+            chat.isChatExpanded = true
+        }
+        
+        chat.updateLiveDictation(transcript)
+    }
+    
+    
     @MainActor
     private func runHandsFreeCommand(_ command: String) {
         withAnimation(.spring()) {
             chat.isChatExpanded = true
         }
         
-        chat.draft = command
-        chat.send()
+        chat.send(command)
     }
 }
 
