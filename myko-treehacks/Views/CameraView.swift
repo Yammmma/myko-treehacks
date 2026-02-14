@@ -1,10 +1,3 @@
-//
-//    CameraView.swift
-//    myko-treehacks
-//
-//    Created by Yuma Soerianto on 2/13/26.
-//
-
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -16,9 +9,6 @@ import Combine
 let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
 
 struct CameraView: View {
-    var onImageCaptured: ((UIImage) -> Void)? = nil
-    var captureTrigger: Int = 0
-    
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     
     @State private var currentZoom = 0.0
@@ -28,13 +18,11 @@ struct CameraView: View {
     
     @State private var annotatedImage: UIImage?
     
-    @State private var isCapturing = false
-    
     var body: some View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, isCapturing: $isCapturing, onImageCaptured: onImageCaptured, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt)
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, pendingPrompt: $pendingPrompt)
                     .ignoresSafeArea()
                     .clipShape(Circle())
                     .overlay {
@@ -84,10 +72,6 @@ struct CameraView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
-        .onChange(of: captureTrigger) { _, _ in
-            guard authorizationStatus == .authorized else { return }
-            isCapturing = true
-        }
         .gesture(
             MagnifyGesture()
                 .onChanged { value in
@@ -125,8 +109,6 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var currentZoom: Double
     @Binding var totalZoom: Double
     @Binding var capturedImage: UIImage?
-    @Binding var isCapturing: Bool
-    let onImageCaptured: ((UIImage) -> Void)?
     @Binding var annotatedImage: UIImage?
     @Binding var pendingPrompt: String
     
@@ -153,329 +135,312 @@ private struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         
-        if isCapturing {
-            context.coordinator.requestSnapshot { image in
-                DispatchQueue.main.async {
-                    self.capturedImage = image
-                    self.isCapturing = false
-                    if let image {
-                        self.onImageCaptured?(image)
-                    }
-                    self.makeInference()
-                }
-                
-                // Handle manual capture trigger (HTTP Query)
-                if pendingPrompt != "" {
-                    captureImage(context: context, mode: .query)
-                    DispatchQueue.main.async {
-                        self.pendingPrompt = ""
-                    }
-                }
+        // Handle manual capture trigger (HTTP Query)
+        if pendingPrompt != "" {
+            captureImage(context: context, mode: .query)
+            DispatchQueue.main.async {
+                self.pendingPrompt = ""
             }
-            
-            enum CaptureMode {
-                case stream // WebSocket
-                case query    // HTTP POST
-            }
-            
-            func captureImage(context: Context, mode: CaptureMode) {
-                context.coordinator.requestSnapshot { image in
-                    guard let img = image else { return }
-                    
-                    DispatchQueue.main.async {
-                        self.capturedImage = img
-                    }
-                    
-                    // Route based on mode
-                    if mode == .stream {
-                        context.coordinator.sendFrameWS(image: img)
-                    } else {
-                        context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
-                    }
-                }
-            }
-            
-            func makeCoordinator() -> Coordinator {
-                Coordinator()
-            }
-            
-            // MARK: - Coordinator (Handles Camera & Network)
-            
-            final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-                // --- Camera Properties ---
-                private let session = AVCaptureSession()
-                private let sessionQueue = DispatchQueue(label: "camera.session.queue")
-                private var device: AVCaptureDevice?
-                private var deviceLockAcquired = false
-                private let videoOutput = AVCaptureVideoDataOutput()
-                private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
-                private let ciContext = CIContext()
-                private var pendingSnapshotRequest: ((UIImage?) -> Void)?
-                
-                // --- Network Properties ---
-                private var webSocketTask: URLSessionWebSocketTask?
-                var onFrameReceived: ((UIImage) -> Void)?
-                
-                struct InferenceWSSchema: Codable {
-                    let frame: String
-                }
-                
-                struct InferenceHTTPSchema: Codable {
-                    let prompt: String
-                    let frame: String
-                }
-                
-                struct InferenceHTTPResponse: Codable {
-                    let response: String
-                }
-                
-                // 1. Setup WebSocket
-                func setupWebSocket() {
-                    guard let url = URL(string: "wss://\(ENDPOINT_URL_BASE)/ws") else {
-                        print("❌ Invalid WS URL")
-                        return
-                    }
-                    webSocketTask = URLSession.shared.webSocketTask(with: url)
-                    webSocketTask?.resume()
-                    listenForMessages()
-                }
-                
-                // 2. Recursive Listener
-                private func listenForMessages() {
-                    webSocketTask?.receive { [weak self] result in
-                        guard let self = self else { return }
-                        
-                        switch result {
-                        case .success(let message):
-                            self.handleMessage(message)
-                            self.listenForMessages() // Recursion
-                        case .failure(let error):
-                            print("❌ WebSocket Receive Error: \(error)")
-                        }
-                    }
-                }
-                
-                // 3. Robust Decoding
-                private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-                    switch message {
-                    case .string(let imageB64):
-                        var sanitized = imageB64.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                        
-                        if let commaRange = sanitized.range(of: ",") {
-                            sanitized = String(sanitized[commaRange.upperBound...])
-                        }
-                        
-                        if let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters),
-                           let image = UIImage(data: imageData) {
-                            DispatchQueue.main.async { self.onFrameReceived?(image) }
-                        }
-                    case .data(let data):
-                        if let image = UIImage(data: data) {
-                            DispatchQueue.main.async { self.onFrameReceived?(image) }
-                        }
-                    @unknown default: break
-                    }
-                }
-                
-                // 4. Send Frame (WebSocket)
-                func sendFrameWS(image: UIImage) {
-                    guard let frameB64 = image.base64EncodedString() else { return }
-                    let schema = InferenceWSSchema(frame: frameB64)
-                    
-                    do {
-                        let jsonData = try JSONEncoder().encode(schema)
-                        let message = URLSessionWebSocketTask.Message.data(jsonData)
-                        webSocketTask?.send(message) { error in
-                            if let error = error { print("❌ WS Send Error: \(error)") }
-                        }
-                    } catch {
-                        print("❌ JSON Error: \(error)")
-                    }
-                }
-                
-                // 5. Make Inference (HTTP POST) - RESTORED
-                func makeInferenceHTTP(prompt: String, image: UIImage) {
-                    guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return }
-                    guard let frameB64 = image.base64EncodedString() else { return }
-                    
-                    let post = InferenceHTTPSchema(
-                        prompt: prompt,
-                        frame: frameB64
-                    )
-                    
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "POST"
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    
-                    do {
-                        let jsonData = try JSONEncoder().encode(post)
-                        request.httpBody = jsonData
-                        
-                        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-                            if let error = error {
-                                print("❌ HTTP Error: \(error.localizedDescription)")
-                                return
-                            }
-                            if let data = data {
-                                Task { @MainActor in
-                                    do {
-                                        let result = try JSONDecoder().decode(InferenceHTTPResponse.self, from: data)
-                                        receiveMessage.send(result.response)
-                                    } catch {
-                                        print("❌ HTTP Decoding Error: \(error)")
-                                    }
-                                }
-                            }
-                        }
-                        
-                        task.resume()
-                    } catch {
-                        print("❌ HTTP Encoding Error: \(error)")
-                    }
-                }
-                
-                // --- Camera Logic ---
-                
-                func configureSession(on previewView: PreviewView) {
-                    previewView.videoPreviewLayer.session = session
-                    sessionQueue.async { [weak self] in
-                        guard let self else { return }
-                        self.session.beginConfiguration()
-                        self.session.sessionPreset = .high
-                        
-                        let selectedDevice = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back)
-                        ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-                        
-                        guard let device = selectedDevice,
-                              let input = try? AVCaptureDeviceInput(device: device),
-                              self.session.canAddInput(input) else {
-                            self.session.commitConfiguration()
-                            return
-                        }
-                        self.session.addInput(input)
-                        self.device = device
-                        
-                        do {
-                            try device.lockForConfiguration()
-                            deviceLockAcquired = true
-                        } catch {
-                            print("Can't acquire camera lock", error)
-                        }
-                        
-                        videoOutput.alwaysDiscardsLateVideoFrames = true
-                        videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-                        if session.canAddOutput(videoOutput) {
-                            session.addOutput(videoOutput)
-                            videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
-                            if let connection = videoOutput.connection(with: .video) {
-                                connection.videoOrientation = .portrait
-                                connection.isVideoMirrored = false
-                            }
-                        }
-                        
-                        self.session.commitConfiguration()
-                        if !self.session.isRunning {
-                            self.session.startRunning()
-                        }
-                    }
-                }
-                
-                func updateZoom(to zoom: Double) {
-                    let clampedZoom = min(max(zoom, 1), device?.activeFormat.videoMaxZoomFactor ?? 1)
-                    device?.videoZoomFactor = clampedZoom
-                }
-                
-                func requestSnapshot(completion: @escaping (UIImage?) -> Void) {
-                    pendingSnapshotRequest = completion
-                }
-                
-                private func cgImage(from sampleBuffer: CMSampleBuffer) -> CGImage? {
-                    guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
-                    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-                    return ciContext.createCGImage(ciImage, from: ciImage.extent)
-                }
-                
-                private func circularMaskedImage(from cgImage: CGImage) -> CGImage? {
-                    let width = cgImage.width
-                    let height = cgImage.height
-                    let colorSpace = CGColorSpaceCreateDeviceRGB()
-                    guard let context = CGContext(
-                        data: nil,
-                        width: width,
-                        height: height,
-                        bitsPerComponent: 8,
-                        bytesPerRow: 0,
-                        space: colorSpace,
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                    ) else { return nil }
-                    
-                    context.interpolationQuality = .high
-                    context.setShouldAntialias(true)
-                    
-                    let radius = CGFloat(min(width, height)) / 2.0
-                    let center = CGPoint(x: CGFloat(width) / 2.0, y: CGFloat(height) / 2.0)
-                    let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                    context.addEllipse(in: rect)
-                    context.clip()
-                    
-                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-                    return context.makeImage()
-                }
-                
-                func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-                    guard let requester = pendingSnapshotRequest else { return }
-                    pendingSnapshotRequest = nil
-                    
-                    guard let cg = cgImage(from: sampleBuffer),
-                          let masked = circularMaskedImage(from: cg) else {
-                        requester(nil)
-                        return
-                    }
-                    let uiImage = UIImage(cgImage: masked)
-                    requester(uiImage)
-                }
-                
-                deinit {
-                    webSocketTask?.cancel(with: .normalClosure, reason: nil)
-                    if deviceLockAcquired {
-                        device?.unlockForConfiguration()
-                    }
-                    if session.isRunning { session.stopRunning() }
-                }
-            }
-        }
-        
-        // MARK: - PreviewView (CALayer backed)
-        
-        private final class PreviewView: UIView {
-            override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-            var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-            
-            override init(frame: CGRect) {
-                super.init(frame: frame)
-                commonInit()
-            }
-            required init?(coder: NSCoder) {
-                super.init(coder: coder)
-                commonInit()
-            }
-            private func commonInit() {
-                videoPreviewLayer.videoGravity = .resizeAspect
-            }
-        }
-        
-        extension UIImage {
-            func base64EncodedString() -> String? {
-                guard let imageData = self.jpegData(compressionQuality: 0.5) else { return nil }
-                let base64String = imageData.base64EncodedString(options: [])
-                // IMPORTANT: Sending Data URI prefix for compatibility
-                return "data:image/jpeg;base64,\(base64String)"
-            }
-        }
-        
-        #Preview {
-            CameraView()
         }
     }
+    
+    enum CaptureMode {
+        case stream // WebSocket
+        case query    // HTTP POST
+    }
+    
+    func captureImage(context: Context, mode: CaptureMode) {
+        context.coordinator.requestSnapshot { image in
+            guard let img = image else { return }
+            
+            DispatchQueue.main.async {
+                self.capturedImage = img
+            }
+            
+            // Route based on mode
+            if mode == .stream {
+                context.coordinator.sendFrameWS(image: img)
+            } else {
+                context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
+            }
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    // MARK: - Coordinator (Handles Camera & Network)
+    
+    final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+        // --- Camera Properties ---
+        private let session = AVCaptureSession()
+        private let sessionQueue = DispatchQueue(label: "camera.session.queue")
+        private var device: AVCaptureDevice?
+        private var deviceLockAcquired = false
+        private let videoOutput = AVCaptureVideoDataOutput()
+        private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
+        private let ciContext = CIContext()
+        private var pendingSnapshotRequest: ((UIImage?) -> Void)?
+        
+        // --- Network Properties ---
+        private var webSocketTask: URLSessionWebSocketTask?
+        var onFrameReceived: ((UIImage) -> Void)?
+        
+        struct InferenceWSSchema: Codable {
+            let frame: String
+        }
+        
+        struct InferenceHTTPSchema: Codable {
+            let prompt: String
+            let frame: String
+        }
+        
+        struct InferenceHTTPResponse: Codable {
+            let response: String
+        }
+        
+        // 1. Setup WebSocket
+        func setupWebSocket() {
+            guard let url = URL(string: "wss://\(ENDPOINT_URL_BASE)/ws") else {
+                print("❌ Invalid WS URL")
+                return
+            }
+            webSocketTask = URLSession.shared.webSocketTask(with: url)
+            webSocketTask?.resume()
+            listenForMessages()
+        }
+        
+        // 2. Recursive Listener
+        private func listenForMessages() {
+            webSocketTask?.receive { [weak self] result in
+                guard let self = self else { return }
+                
+                switch result {
+                case .success(let message):
+                    self.handleMessage(message)
+                    self.listenForMessages() // Recursion
+                case .failure(let error):
+                    print("❌ WebSocket Receive Error: \(error)")
+                }
+            }
+        }
+        
+        // 3. Robust Decoding
+        private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+            switch message {
+            case .string(let imageB64):
+                var sanitized = imageB64.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                
+                if let commaRange = sanitized.range(of: ",") {
+                    sanitized = String(sanitized[commaRange.upperBound...])
+                }
+                
+                if let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters),
+                    let image = UIImage(data: imageData) {
+                    DispatchQueue.main.async { self.onFrameReceived?(image) }
+                }
+            case .data(let data):
+                if let image = UIImage(data: data) {
+                    DispatchQueue.main.async { self.onFrameReceived?(image) }
+                }
+            @unknown default: break
+            }
+        }
+        
+        // 4. Send Frame (WebSocket)
+        func sendFrameWS(image: UIImage) {
+            guard let frameB64 = image.base64EncodedString() else { return }
+            let schema = InferenceWSSchema(frame: frameB64)
+            
+            do {
+                let jsonData = try JSONEncoder().encode(schema)
+                let message = URLSessionWebSocketTask.Message.data(jsonData)
+                webSocketTask?.send(message) { error in
+                    if let error = error { print("❌ WS Send Error: \(error)") }
+                }
+            } catch {
+                print("❌ JSON Error: \(error)")
+            }
+        }
+        
+        // 5. Make Inference (HTTP POST) - RESTORED
+        func makeInferenceHTTP(prompt: String, image: UIImage) {
+            guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return }
+            guard let frameB64 = image.base64EncodedString() else { return }
+            
+            let post = InferenceHTTPSchema(
+                prompt: prompt,
+                frame: frameB64
+            )
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            do {
+                let jsonData = try JSONEncoder().encode(post)
+                request.httpBody = jsonData
+                
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        print("❌ HTTP Error: \(error.localizedDescription)")
+                        return
+                    }
+                    if let data = data {
+                        Task { @MainActor in
+                            do {
+                                let result = try JSONDecoder().decode(InferenceHTTPResponse.self, from: data)
+                                receiveMessage.send(result.response)
+                            } catch {
+                                print("❌ HTTP Decoding Error: \(error)")
+                            }
+                        }
+                    }
+                }
+                
+                task.resume()
+            } catch {
+                print("❌ HTTP Encoding Error: \(error)")
+            }
+        }
+        
+        // --- Camera Logic ---
+        
+        func configureSession(on previewView: PreviewView) {
+            previewView.videoPreviewLayer.session = session
+            sessionQueue.async { [weak self] in
+                guard let self else { return }
+                self.session.beginConfiguration()
+                self.session.sessionPreset = .high
+                
+                let selectedDevice = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back)
+                    ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                
+                guard let device = selectedDevice,
+                        let input = try? AVCaptureDeviceInput(device: device),
+                        self.session.canAddInput(input) else {
+                    self.session.commitConfiguration()
+                    return
+                }
+                self.session.addInput(input)
+                self.device = device
+                
+                do {
+                    try device.lockForConfiguration()
+                    deviceLockAcquired = true
+                } catch {
+                    print("Can't acquire camera lock", error)
+                }
+                
+                videoOutput.alwaysDiscardsLateVideoFrames = true
+                videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+                if session.canAddOutput(videoOutput) {
+                    session.addOutput(videoOutput)
+                    videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
+                }
+                
+                self.session.commitConfiguration()
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
+            }
+        }
+        
+        func updateZoom(to zoom: Double) {
+            let clampedZoom = min(max(zoom, 1), device?.activeFormat.videoMaxZoomFactor ?? 1)
+            device?.videoZoomFactor = clampedZoom
+        }
+        
+        func requestSnapshot(completion: @escaping (UIImage?) -> Void) {
+            pendingSnapshotRequest = completion
+        }
+        
+        private func cgImage(from sampleBuffer: CMSampleBuffer) -> CGImage? {
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            return ciContext.createCGImage(ciImage, from: ciImage.extent)
+        }
+        
+        private func circularMaskedImage(from cgImage: CGImage) -> CGImage? {
+            let width = cgImage.width
+            let height = cgImage.height
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            guard let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            
+            context.interpolationQuality = .high
+            context.setShouldAntialias(true)
+            
+            let radius = CGFloat(min(width, height)) / 2.0
+            let center = CGPoint(x: CGFloat(width) / 2.0, y: CGFloat(height) / 2.0)
+            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            context.addEllipse(in: rect)
+            context.clip()
+            
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return context.makeImage()
+        }
+        
+        func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+            guard let requester = pendingSnapshotRequest else { return }
+            pendingSnapshotRequest = nil
+            
+            guard let cg = cgImage(from: sampleBuffer),
+                    let masked = circularMaskedImage(from: cg) else {
+                requester(nil)
+                return
+            }
+            let uiImage = UIImage(cgImage: masked)
+            requester(uiImage)
+        }
+        
+        deinit {
+            webSocketTask?.cancel(with: .normalClosure, reason: nil)
+            if deviceLockAcquired {
+                device?.unlockForConfiguration()
+            }
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+}
+
+// MARK: - PreviewView (CALayer backed)
+
+private final class PreviewView: UIView {
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        commonInit()
+    }
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+    private func commonInit() {
+        videoPreviewLayer.videoGravity = .resizeAspect
+    }
+}
+
+extension UIImage {
+    func base64EncodedString() -> String? {
+        guard let imageData = self.jpegData(compressionQuality: 0.5) else { return nil }
+        let base64String = imageData.base64EncodedString(options: [])
+        // IMPORTANT: Sending Data URI prefix for compatibility
+        return "data:image/jpeg;base64,\(base64String)"
+    }
+}
+
+#Preview {
+    CameraView()
 }

@@ -12,19 +12,19 @@ struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
     @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
-
+    
     @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
     @State private var captureTrigger = 0
-
+    
     var body: some View {
         ZStack(alignment: .bottom) {
-            CameraView(onImageCaptured: handleCapturedImage, captureTrigger: captureTrigger)
+            CameraView()
             
             VStack(spacing: 12) {
                 Spacer()
-
+                
                 if !chat.isChatExpanded, !chat.messages.isEmpty {
                     CollapsedChatPill(chat: chat) {
                         withAnimation(.spring()) {
@@ -34,7 +34,7 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.horizontal, 20)
                 }
-
+                
                 if chat.isChatExpanded {
                     ChatPopupView(chat: chat)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -83,7 +83,7 @@ struct ContentView: View {
                         Image(systemName: "crop") // later: swap based on editing state
                     }
                 }
-
+                
                 ToolbarItem(placement: .bottomBar) {
                     Button {
                         // TODO: hook up analysis action later
@@ -91,7 +91,7 @@ struct ContentView: View {
                         Image(systemName: "sparkles")
                     }
                 }
-
+                
                 ToolbarItem(placement: .bottomBar) {
                     Button {
                         captureTrigger += 1
@@ -99,11 +99,11 @@ struct ContentView: View {
                         Image(systemName: "camera.fill")
                     }
                 }
-
+                
                 ToolbarItem(placement: .bottomBar) {
                     Spacer().frame(width: 12)
                 }
-
+                
                 ToolbarItem(placement: .bottomBar) {
                     Button {
                         withAnimation(.spring()) {
@@ -125,43 +125,40 @@ struct ContentView: View {
         }, message: {
             Text(transcriptionError ?? "Unknown error")
         })
-<<<<<<< HEAD
         .alert("Save Failed", isPresented: .constant(captureError != nil), actions: {
-                    Button("OK") { captureError = nil }
-                }, message: {
-                    Text(captureError ?? "Unknown error")
-                })
-            }
-
-
-            @MainActor
-            private func handleCapturedImage(_ image: UIImage) {
-                do {
-                    try appState.historyStore.save(image: image)
-                    showSavedToast = true
-                    captureError = nil
-
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(1.5))
-                        showSavedToast = false
-                    }
-                } catch {
-                    captureError = "Couldn't save screenshot to History."
-                }
-=======
+            Button("OK") { captureError = nil }
+        }, message: {
+            Text(captureError ?? "Unknown error")
+        })
+        
         .onReceive(receiveMessage) { message in
             chat.receivedMessage(message)
         }
->>>>>>> camera-feed
     }
-
+    
+    @MainActor
+    private func handleCapturedImage(_ image: UIImage) {
+        do {
+            try appState.historyStore.save(image: image)
+            showSavedToast = true
+            captureError = nil
+            
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                showSavedToast = false
+            }
+        } catch {
+            captureError = "Couldn't save screenshot to History."
+        }
+    }
+    
     @MainActor
     private func toggleRecording() async {
         if transcriptionService.isRecording {
             await transcriptionService.stopRecording()
             return
         }
-
+        
         do {
             try await transcriptionService.startRecording { transcript in
                 Task { @MainActor in
@@ -179,13 +176,13 @@ private struct ChatComposerBar: View {
     let isRecording: Bool
     let onToggleRecording: () -> Void
     let onClose: () -> Void
-
+    
     @FocusState private var isFocused: Bool
-
+    
     private var canSend: Bool {
         !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-
+    
     var body: some View {
         HStack(spacing: 10) {
             Button(action: onClose) {
@@ -195,7 +192,7 @@ private struct ChatComposerBar: View {
             .tint(MykoColors.blush)
             .buttonStyle(.bordered)
             .accessibilityLabel("Close chat")
-
+            
             TextField("Ask Myko…", text: $chat.draft, axis: .vertical)
                 .focused($isFocused)
                 .padding(.vertical, 5)
@@ -206,7 +203,7 @@ private struct ChatComposerBar: View {
                 .onSubmit {
                     chat.send()
                 }
-
+            
             Button(action: onToggleRecording) {
                 Image(systemName: isRecording ? "stop.fill" : "mic.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -214,7 +211,7 @@ private struct ChatComposerBar: View {
             .buttonStyle(.bordered)
             .tint(isRecording ? .red : MykoColors.leafBase)
             .accessibilityLabel("Dictate message")
-
+            
             Button {
                 chat.send()
             } label: {
@@ -240,11 +237,11 @@ private struct ChatComposerBar: View {
 private struct CollapsedChatPill: View {
     @ObservedObject var chat: ChatViewModel
     let onTap: () -> Void
-
+    
     private var snippet: String {
         chat.messages.last?.text ?? ""
     }
-
+    
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 8) {
