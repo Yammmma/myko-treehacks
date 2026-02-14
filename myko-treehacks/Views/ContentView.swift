@@ -125,6 +125,7 @@ struct ContentView: View {
         }, message: {
             Text(transcriptionError ?? "Unknown error")
         })
+<<<<<<< HEAD
         .alert("Save Failed", isPresented: .constant(captureError != nil), actions: {
                     Button("OK") { captureError = nil }
                 }, message: {
@@ -147,6 +148,11 @@ struct ContentView: View {
                 } catch {
                     captureError = "Couldn't save screenshot to History."
                 }
+=======
+        .onReceive(receiveMessage) { message in
+            chat.receivedMessage(message)
+        }
+>>>>>>> camera-feed
     }
 
     @MainActor
