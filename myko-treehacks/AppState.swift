@@ -17,5 +17,13 @@ final class AppState: ObservableObject {
 
     @Published var selectedTab: Tab = .home
     let historyStore = HistoryStore()
+    private var cancellables = Set<AnyCancellable>()
 
+    init() {
+        historyStore.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+    }
 }

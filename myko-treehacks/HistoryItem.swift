@@ -9,7 +9,7 @@ import Foundation
 import Combine
 import UIKit
 
-struct HistoryItem: Codable, Identifiable, Equatable {
+struct HistoryItem: Codable, Identifiable, Hashable, Equatable {
     let id: UUID
     let createdAt: Date
     let imagePath: String

@@ -12,6 +12,7 @@ import ImageIO
 struct HistoryCardView: View {
     @EnvironmentObject private var appState: AppState
     let item: HistoryItem
+    var onFavoriteTap: (() -> Void)? = nil
 
     @State private var thumbnail: UIImage?
 
@@ -34,16 +35,13 @@ struct HistoryCardView: View {
                 }
 
                 Button {
-                    appState.historyStore.toggleFavorite(for: item)
+                    onFavoriteTap?()
                 } label: {
                     Image(systemName: item.isFavorite ? "star.fill" : "star")
                         .foregroundStyle(item.isFavorite ? .yellow : .black)
-                        .padding(4)
+                        .padding(8)
                 }
                 .buttonStyle(.plain)
-                .contentShape(Rectangle())
-                .highPriorityGesture(TapGesture())
-                .padding(4)
             }
             .frame(height: 150)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
