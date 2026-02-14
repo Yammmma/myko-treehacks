@@ -8,51 +8,109 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var isChatExpanded = false
-    @State private var chatMessage = ""
-    @State private var transcriptionError: String?
-
+    @StateObject private var chat = ChatViewModel()
     @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
 
+    @State private var transcriptionError: String?
+
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-
-            Text("Hello, world!")
-
-            if transcriptionService.isRecording {
-                HStack(spacing: 8) {
+        ZStack(alignment: .bottom) {
+            CameraView()
+                .overlay {
                     Circle()
-                        .fill(.red)
-                        .frame(width: 10, height: 10)
-                    Text("Recording… transcribing on device")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .stroke(Color.white.opacity(0.8), lineWidth: 3)
+                        .frame(width: 220, height: 220)
+                        .shadow(color: .black.opacity(0.35), radius: 12)
+                }
+
+            VStack(spacing: 12) {
+                Spacer()
+
+                if !chat.isChatExpanded, !chat.messages.isEmpty {
+                    CollapsedChatPill(chat: chat) {
+                        withAnimation(.spring()) {
+                            chat.isChatExpanded = true
+                        }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.horizontal, 20)
+                }
+
+                if chat.isChatExpanded {
+                    ChatPopupView(chat: chat)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
                 }
             }
         }
-        .padding()
-        .navigationTitle("Content")
-        .toolbar {
-            ToolbarItem(placement: .bottomBar) {
-                ToolbarView(
-                    isEditing: false,
-                    onChat: { isChatExpanded.toggle() },
-                    onSendMessage: {
-                        print("send:", chatMessage)
-                        chatMessage = ""
-                    },
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chat.isChatExpanded)
+        .safeAreaInset(edge: .bottom) {
+            if chat.isChatExpanded {
+                ChatComposerBar(
+                    chat: chat,
+                    isRecording: transcriptionService.isRecording,
                     onToggleRecording: {
                         Task { await toggleRecording() }
                     },
-                    isChatExpanded: $isChatExpanded,
-                    chatMessage: $chatMessage,
-                    isRecording: transcriptionService.isRecording
+                    onClose: {
+                        withAnimation(.spring()) {
+                            chat.isChatExpanded = false
+                        }
+                    }
                 )
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .toolbar {
+            if !chat.isChatExpanded {
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        // TODO: hook up editing box toggle later
+                    } label: {
+                        Image(systemName: "crop") // later: swap based on editing state
+                    }
+                }
+
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        // TODO: hook up analysis action later
+                    } label: {
+                        Image(systemName: "sparkles")
+                    }
+                }
+
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        // TODO: hook up capture action later
+                    } label: {
+                        Image(systemName: "camera.fill")
+                    }
+                }
+
+                ToolbarItem(placement: .bottomBar) {
+                    Spacer().frame(width: 12)
+                }
+
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        withAnimation(.spring()) {
+                            chat.isChatExpanded.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "message.fill")
+                    }
+                    .accessibilityLabel("Open chat")
+                }
+                
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
             Button("OK") { transcriptionError = nil }
         }, message: {
@@ -70,7 +128,7 @@ struct ContentView: View {
         do {
             try await transcriptionService.startRecording { transcript in
                 Task { @MainActor in
-                    chatMessage = transcript
+                    chat.draft = transcript
                 }
             }
         } catch {
@@ -79,98 +137,93 @@ struct ContentView: View {
     }
 }
 
-struct ToolbarView: View {
-    let isEditing: Bool
-    let onChat: () -> Void
-    let onSendMessage: () -> Void
-    let onToggleRecording: () -> Void
-    @Binding var isChatExpanded: Bool
-    @Binding var chatMessage: String
+private struct ChatComposerBar: View {
+    @ObservedObject var chat: ChatViewModel
     let isRecording: Bool
+    let onToggleRecording: () -> Void
+    let onClose: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    private var canSend: Bool {
+        !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            if isChatExpanded {
-                Button(action: onChat) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color.white.opacity(0.1)))
-                }
-
-                TextField("Ask Myko…", text: $chatMessage)
-                    .textFieldStyle(.plain)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-                    .foregroundStyle(.white)
-                    .submitLabel(.send)
-                    .onSubmit { onSendMessage() }
-
-                Button(action: onToggleRecording) {
-                    Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(isRecording ? .red : MykoColors.biologyBase))
-                }
-
-                Button(action: onSendMessage) {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(MykoColors.coralBase))
-                }
-            } else {
-                Button(action: onChat) {
-                    Image(systemName: "message.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.white.opacity(0.1)))
-                }
+        HStack(spacing: 10) {
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
             }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Close chat")
+
+            TextField("Ask Myko…", text: $chat.draft)
+                .focused($isFocused)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                .submitLabel(.send)
+                .onSubmit {
+                    chat.send()
+                }
+
+            Button(action: onToggleRecording) {
+                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.bordered)
+            .tint(isRecording ? .red : MykoColors.biologyBase)
+            .accessibilityLabel("Dictate message")
+
+            Button {
+                chat.send()
+            } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSend)
+            .accessibilityLabel("Send message")
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
-        .animation(.easeInOut(duration: 0.2), value: isChatExpanded)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+        .onAppear { isFocused = true }
     }
 }
 
-struct ToolbarButton: View {
-    let title: String
-    let systemImage: String
-    let isActive: Bool
-    let action: () -> Void
+private struct CollapsedChatPill: View {
+    @ObservedObject var chat: ChatViewModel
+    let onTap: () -> Void
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(isActive ? MykoColors.coralBase : .white)
-                .frame(width: 44, height: 44)
-                .background(
-                    Circle()
-                        .fill(isActive ? MykoColors.coralLight.opacity(0.4) : Color.white.opacity(0.08))
-                )
-        }
-        .accessibilityLabel(title)
+    private var snippet: String {
+        chat.messages.last?.text ?? ""
     }
-}
-
-struct ToastView: View {
-    let text: String
 
     var body: some View {
-        Text(text)
-            .font(.footnote.weight(.semibold))
-            .padding(.vertical, 8)
-            .padding(.horizontal, 16)
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Text("Myko")
+                    .font(.subheadline.weight(.semibold))
+                Text(snippet)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
             .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(MykoColors.biologyBase.opacity(0.3), lineWidth: 1))
-            .foregroundStyle(.primary)
+            .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
