@@ -8,6 +8,8 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import CoreImage
+import CoreVideo
 
 struct CameraView: View {
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -15,13 +17,33 @@ struct CameraView: View {
     
     @State private var currentZoom = 0.0
     @State private var totalZoom = 1.0
-
+    @State private var capturedImage: UIImage?
+    @State private var isCapturing = false
+    
     var body: some View {
-        Group {
+        ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom)
-                    .ignoresSafeArea()
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, isCapturing: $isCapturing)
+                      .ignoresSafeArea()
+                      .clipShape(Circle())
+                      .overlay(alignment: .bottom) {
+                          Button(action: { isCapturing = true }) {
+                              Image(systemName: "circle.inset.filled")
+                                  .font(.system(size: 44))
+                                  .foregroundStyle(.white)
+                                  .shadow(radius: 4)
+                                  .padding(24)
+                          }
+                      }
+                      .overlay {
+                          if let image = capturedImage {
+                              Image(uiImage: image)
+                                  .resizable()
+                                  .scaledToFit()
+                                  .transition(.opacity)
+                          }
+                      }
             case .notDetermined:
                 VStack(spacing: 16) {
                     Text("Camera Access Required")
@@ -57,6 +79,10 @@ struct CameraView: View {
         }
         .onAppear {
             authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
         .gesture(
             MagnifyGesture()
@@ -91,6 +117,8 @@ struct CameraView: View {
 private struct CameraPreview: UIViewRepresentable {
     @Binding var currentZoom: Double
     @Binding var totalZoom: Double
+    @Binding var capturedImage: UIImage?
+    @Binding var isCapturing: Bool
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -99,19 +127,82 @@ private struct CameraPreview: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-//        uiView.videoPreviewLayer.contentsScale = currentZoom + totalZoom
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
+        if isCapturing {
+            context.coordinator.requestSnapshot { image in
+                DispatchQueue.main.async {
+                    self.capturedImage = image
+                    self.isCapturing = false
+                    self.makeInference()
+                }
+            }
+        }
+    }
+    
+    struct InferenceSchema: Codable {
+        let prompt: String
+        let frame: String // b64 encoding of frame
+    }
+    
+    func makeInference() {
+        guard let url = URL(string: "https://547e-171-66-12-188.ngrok-free.app/query") else { return }
+        guard let capturedImage,
+              let frameB64 = capturedImage.base64EncodedString() else { return }
+        
+        let post = InferenceSchema(
+            prompt: "Describe this sample:",
+            frame: frameB64
+        )
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            let jsonData = try JSONEncoder().encode(post)
+            request.httpBody = jsonData
+
+            // 4. Use URLSession to send the request
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                // Handle the response here
+                if let error = error {
+                    print("Error: \(error.localizedDescription)")
+                    return
+                }
+
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    print("HTTP Status Code: \(httpResponse.statusCode)")
+                    return
+                }
+
+                if let data = data {
+                    // Process the returned data (e.g., decode the response)
+                    print("Response data received: \(String(data: data, encoding: .utf8) ?? "")")
+                }
+            }
+
+            // 5. Resume the task
+            task.resume()
+            
+        } catch {
+            print("Error encoding JSON: \(error.localizedDescription)")
+        }
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         private let session = AVCaptureSession()
         private let sessionQueue = DispatchQueue(label: "camera.session.queue")
         private var device: AVCaptureDevice?
         private var deviceLockAcquired = false
+        
+        private let videoOutput = AVCaptureVideoDataOutput()
+        private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
+        private let ciContext = CIContext()
+        private var pendingSnapshotRequest: ((UIImage?) -> Void)?
 
         func configureSession(on previewView: PreviewView) {
             previewView.videoPreviewLayer.session = session
@@ -121,7 +212,7 @@ private struct CameraPreview: UIViewRepresentable {
                 self.session.sessionPreset = .high
 
                 // Input: Rear wide angle camera
-                guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                guard let device = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
                       let input = try? AVCaptureDeviceInput(device: device),
                       self.session.canAddInput(input) else {
                     self.session.commitConfiguration()
@@ -137,7 +228,12 @@ private struct CameraPreview: UIViewRepresentable {
                     print("Can't acquire camera lock", error)
                 }
 
-                // TODO: Add output feed for inferencing
+                videoOutput.alwaysDiscardsLateVideoFrames = true
+                videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+                if session.canAddOutput(videoOutput) {
+                    session.addOutput(videoOutput)
+                    videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
+                }
 
                 self.session.commitConfiguration()
                 if !self.session.isRunning {
@@ -150,7 +246,58 @@ private struct CameraPreview: UIViewRepresentable {
             let clampedZoom = min(max(zoom, 1), device?.activeFormat.videoMaxZoomFactor ?? 1)
             
             device?.videoZoomFactor = clampedZoom
-//            previewView.videoPreviewLayer.contentsScale = zoom
+        }
+        
+        func requestSnapshot(completion: @escaping (UIImage?) -> Void) {
+            // Keep only the last requester
+            pendingSnapshotRequest = completion
+        }
+        
+        private func cgImage(from sampleBuffer: CMSampleBuffer) -> CGImage? {
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            return ciContext.createCGImage(ciImage, from: ciImage.extent)
+        }
+        
+        private func circularMaskedImage(from cgImage: CGImage) -> CGImage? {
+            let width = cgImage.width
+            let height = cgImage.height
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bytesPerRow = 0
+            guard let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+
+            context.interpolationQuality = .high
+            context.setShouldAntialias(true)
+
+            let radius = CGFloat(min(width, height)) / 2.0
+            let center = CGPoint(x: CGFloat(width) / 2.0, y: CGFloat(height) / 2.0)
+            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            context.addEllipse(in: rect)
+            context.clip()
+
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return context.makeImage()
+        }
+        
+        func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+            guard let requester = pendingSnapshotRequest else { return }
+            pendingSnapshotRequest = nil
+
+            guard let cg = cgImage(from: sampleBuffer),
+                  let masked = circularMaskedImage(from: cg) else {
+                requester(nil)
+                return
+            }
+            let uiImage = UIImage(cgImage: masked)
+            requester(uiImage)
         }
 
         deinit {
@@ -181,7 +328,18 @@ private final class PreviewView: UIView {
     }
 
     private func commonInit() {
-        videoPreviewLayer.videoGravity = .resizeAspectFill
+        videoPreviewLayer.videoGravity = .resizeAspect
+    }
+}
+
+extension UIImage {
+    func base64EncodedString() -> String? {
+        var imageData: Data?
+        imageData = self.jpegData(compressionQuality: 0.5)
+        
+        guard let base64String = imageData?.base64EncodedString(options: []) else { return nil }
+        
+        return "data:image/jpeg;base64,\(base64String)"
     }
 }
 
