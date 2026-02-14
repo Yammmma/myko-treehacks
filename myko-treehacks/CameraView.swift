@@ -19,7 +19,7 @@ struct CameraView: View {
     @State private var totalZoom = 1.0
     @State private var capturedImage: UIImage?
     @State private var isCapturing = false
-//    https://547e-171-66-12-188.ngrok-free.app/query
+    
     var body: some View {
         ZStack {
             switch authorizationStatus {
@@ -133,8 +133,59 @@ private struct CameraPreview: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self.capturedImage = image
                     self.isCapturing = false
+                    self.makeInference()
                 }
             }
+        }
+    }
+    
+    struct InferenceSchema: Codable {
+        let prompt: String
+        let frame: String // b64 encoding of frame
+    }
+    
+    func makeInference() {
+        guard let url = URL(string: "https://547e-171-66-12-188.ngrok-free.app/query") else { return }
+        guard let capturedImage,
+              let frameB64 = capturedImage.base64EncodedString() else { return }
+        
+        let post = InferenceSchema(
+            prompt: "Describe this sample:",
+            frame: frameB64
+        )
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            let jsonData = try JSONEncoder().encode(post)
+            request.httpBody = jsonData
+
+            // 4. Use URLSession to send the request
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                // Handle the response here
+                if let error = error {
+                    print("Error: \(error.localizedDescription)")
+                    return
+                }
+
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    print("HTTP Status Code: \(httpResponse.statusCode)")
+                    return
+                }
+
+                if let data = data {
+                    // Process the returned data (e.g., decode the response)
+                    print("Response data received: \(String(data: data, encoding: .utf8) ?? "")")
+                }
+            }
+
+            // 5. Resume the task
+            task.resume()
+            
+        } catch {
+            print("Error encoding JSON: \(error.localizedDescription)")
         }
     }
 
@@ -183,8 +234,6 @@ private struct CameraPreview: UIViewRepresentable {
                     session.addOutput(videoOutput)
                     videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
                 }
-
-                // TODO: Add output feed for inferencing
 
                 self.session.commitConfiguration()
                 if !self.session.isRunning {
@@ -280,6 +329,17 @@ private final class PreviewView: UIView {
 
     private func commonInit() {
         videoPreviewLayer.videoGravity = .resizeAspect
+    }
+}
+
+extension UIImage {
+    func base64EncodedString() -> String? {
+        var imageData: Data?
+        imageData = self.jpegData(compressionQuality: 0.5)
+        
+        guard let base64String = imageData?.base64EncodedString(options: []) else { return nil }
+        
+        return "data:image/jpeg;base64,\(base64String)"
     }
 }
 
