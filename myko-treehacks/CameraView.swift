@@ -25,25 +25,25 @@ struct CameraView: View {
             switch authorizationStatus {
             case .authorized:
                 CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, isCapturing: $isCapturing)
-                      .ignoresSafeArea()
-                      .clipShape(Circle())
-                      .overlay(alignment: .bottom) {
-                          Button(action: { isCapturing = true }) {
-                              Image(systemName: "circle.inset.filled")
-                                  .font(.system(size: 44))
-                                  .foregroundStyle(.white)
-                                  .shadow(radius: 4)
-                                  .padding(24)
-                          }
-                      }
-                      .overlay {
-                          if let image = capturedImage {
-                              Image(uiImage: image)
-                                  .resizable()
-                                  .scaledToFit()
-                                  .transition(.opacity)
-                          }
-                      }
+                    .ignoresSafeArea()
+                    .clipShape(Circle())
+                    .overlay(alignment: .bottom) {
+                        Button(action: { isCapturing = true }) {
+                            Image(systemName: "circle.inset.filled")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.white)
+                                .shadow(radius: 4)
+                                .padding(24)
+                        }
+                    }
+                    .overlay {
+                        if let image = capturedImage {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .transition(.opacity)
+                        }
+                    }
             case .notDetermined:
                 VStack(spacing: 16) {
                     Text("Camera Access Required")
@@ -95,7 +95,7 @@ struct CameraView: View {
                 }
         )
     }
-
+    
     private func requestAccess() {
         AVCaptureDevice.requestAccess(for: .video) { granted in
             DispatchQueue.main.async {
@@ -103,7 +103,7 @@ struct CameraView: View {
             }
         }
     }
-
+    
     private func openSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         if UIApplication.shared.canOpenURL(url) {
@@ -125,7 +125,7 @@ private struct CameraPreview: UIViewRepresentable {
         context.coordinator.configureSession(on: view)
         return view
     }
-
+    
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         if isCapturing {
@@ -161,7 +161,7 @@ private struct CameraPreview: UIViewRepresentable {
         do {
             let jsonData = try JSONEncoder().encode(post)
             request.httpBody = jsonData
-
+            
             // 4. Use URLSession to send the request
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
                 // Handle the response here
@@ -169,18 +169,18 @@ private struct CameraPreview: UIViewRepresentable {
                     print("Error: \(error.localizedDescription)")
                     return
                 }
-
+                
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
                     print("HTTP Status Code: \(httpResponse.statusCode)")
                     return
                 }
-
+                
                 if let data = data {
                     // Process the returned data (e.g., decode the response)
                     print("Response data received: \(String(data: data, encoding: .utf8) ?? "")")
                 }
             }
-
+            
             // 5. Resume the task
             task.resume()
             
@@ -188,11 +188,11 @@ private struct CameraPreview: UIViewRepresentable {
             print("Error encoding JSON: \(error.localizedDescription)")
         }
     }
-
+    
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
-
+    
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         private let session = AVCaptureSession()
         private let sessionQueue = DispatchQueue(label: "camera.session.queue")
@@ -203,16 +203,21 @@ private struct CameraPreview: UIViewRepresentable {
         private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
         private let ciContext = CIContext()
         private var pendingSnapshotRequest: ((UIImage?) -> Void)?
-
+        
         func configureSession(on previewView: PreviewView) {
             previewView.videoPreviewLayer.session = session
             sessionQueue.async { [weak self] in
                 guard let self else { return }
                 self.session.beginConfiguration()
                 self.session.sessionPreset = .high
-
+                
                 // Input: Rear wide angle camera
-                guard let device = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
+                // Prefer telephoto when available, but fall back to wide angle so preview works on all devices/simulator.
+                let selectedDevice =
+                AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                
+                guard let device = selectedDevice,
                       let input = try? AVCaptureDeviceInput(device: device),
                       self.session.canAddInput(input) else {
                     self.session.commitConfiguration()
@@ -227,14 +232,14 @@ private struct CameraPreview: UIViewRepresentable {
                 } catch {
                     print("Can't acquire camera lock", error)
                 }
-
+                
                 videoOutput.alwaysDiscardsLateVideoFrames = true
                 videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
                 if session.canAddOutput(videoOutput) {
                     session.addOutput(videoOutput)
                     videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
                 }
-
+                
                 self.session.commitConfiguration()
                 if !self.session.isRunning {
                     self.session.startRunning()
@@ -273,16 +278,16 @@ private struct CameraPreview: UIViewRepresentable {
                 space: colorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return nil }
-
+            
             context.interpolationQuality = .high
             context.setShouldAntialias(true)
-
+            
             let radius = CGFloat(min(width, height)) / 2.0
             let center = CGPoint(x: CGFloat(width) / 2.0, y: CGFloat(height) / 2.0)
             let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
             context.addEllipse(in: rect)
             context.clip()
-
+            
             context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
             return context.makeImage()
         }
@@ -290,7 +295,7 @@ private struct CameraPreview: UIViewRepresentable {
         func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
             guard let requester = pendingSnapshotRequest else { return }
             pendingSnapshotRequest = nil
-
+            
             guard let cg = cgImage(from: sampleBuffer),
                   let masked = circularMaskedImage(from: cg) else {
                 requester(nil)
@@ -299,7 +304,7 @@ private struct CameraPreview: UIViewRepresentable {
             let uiImage = UIImage(cgImage: masked)
             requester(uiImage)
         }
-
+        
         deinit {
             if deviceLockAcquired {
                 device?.unlockForConfiguration()
@@ -314,19 +319,19 @@ private struct CameraPreview: UIViewRepresentable {
 
 private final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-
+    
     var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         commonInit()
     }
-
+    
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         commonInit()
     }
-
+    
     private func commonInit() {
         videoPreviewLayer.videoGravity = .resizeAspect
     }
