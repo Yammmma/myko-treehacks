@@ -11,6 +11,8 @@ import UIKit
 import CoreImage
 import CoreVideo
 
+let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app/"
+
 struct CameraView: View {
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @State private var showSettingsAlert = false
@@ -20,11 +22,13 @@ struct CameraView: View {
     @State private var capturedImage: UIImage?
     @State private var isCapturing = false
     
+    @State private var annotatedImage: UIImage?
+    
     var body: some View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, isCapturing: $isCapturing)
+                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, annotatedImage: $annotatedImage, isCapturing: $isCapturing)
                     .ignoresSafeArea()
                     .clipShape(Circle())
                     .overlay(alignment: .bottom) {
@@ -37,11 +41,10 @@ struct CameraView: View {
                         }
                     }
                     .overlay {
-                        if let image = capturedImage {
+                        if let image = annotatedImage {
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFit()
-                                .transition(.opacity)
                         }
                     }
             case .notDetermined:
@@ -118,24 +121,79 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var currentZoom: Double
     @Binding var totalZoom: Double
     @Binding var capturedImage: UIImage?
+    @Binding var annotatedImage: UIImage?
     @Binding var isCapturing: Bool
+    let webSocketTask = URLSession.shared.webSocketTask(with: URL(string: "wss://\(ENDPOINT_URL_BASE)ws")!)
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         context.coordinator.configureSession(on: view)
+        
+        webSocketTask.resume()
+        webSocketTask.receive(completionHandler: receiveWebSocket)
+        
+        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { _ in
+            captureImage(context: context, makeInferenceWS)
+        }
+        
         return view
     }
     
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         if isCapturing {
-            context.coordinator.requestSnapshot { image in
-                DispatchQueue.main.async {
-                    self.capturedImage = image
-                    self.isCapturing = false
-//                    self.makeInference()
-                }
+            captureImage(context: context, makeInference)
+        }
+    }
+    
+    func captureImage(context: Context, _ completion: @escaping () -> ()) {
+        context.coordinator.requestSnapshot { image in
+            DispatchQueue.main.async {
+                self.capturedImage = image
+                self.isCapturing = false
+                completion()
             }
+        }
+    }
+    
+    func receiveWebSocket(result: Result<URLSessionWebSocketTask.Message, any Error>) {
+        switch result {
+        case .success(let message):
+            switch message {
+            case .string(let imageB64):
+                // 1. Sanitize the string: Remove quotes, whitespace, and prefixes
+                var sanitized = imageB64.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                
+                if let commaRange = sanitized.range(of: ",") {
+                    sanitized = String(sanitized[commaRange.upperBound...])
+                }
+                
+                // 2. Convert to Data
+                guard let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters) else {
+                    print("❌ Base64 data conversion failed")
+                    return
+                }
+                
+                // 3. Convert to Image
+                guard let decodedImage = UIImage(data: imageData) else {
+                    print("❌ UIImage creation failed. Data size: \(imageData.count) bytes")
+                    return
+                }
+                
+                // 4. Update UI on Main Thread
+                DispatchQueue.main.async {
+                    self.annotatedImage = decodedImage
+                }
+                
+            case .data(let data):
+                if let decodedImage = UIImage(data: data) {
+                    DispatchQueue.main.async { self.annotatedImage = decodedImage }
+                }
+            @unknown default: break
+            }
+        case .failure(let error):
+            print("WebSocket Error: \(error)")
         }
     }
     
@@ -144,8 +202,34 @@ private struct CameraPreview: UIViewRepresentable {
         let frame: String // b64 encoding of frame
     }
     
+    struct InferenceWSSchema: Codable {
+        let frame: String // b64 encoding of frame
+    }
+    
+    func makeInferenceWS() {
+        guard let capturedImage,
+              let frameB64 = capturedImage.base64EncodedString() else { return }
+        
+        let post = InferenceWSSchema(
+            frame: frameB64
+        )
+        
+        do {
+            let jsonData = try JSONEncoder().encode(post)
+            
+            let messageObj = URLSessionWebSocketTask.Message.data(jsonData)
+            webSocketTask.send(messageObj) { error in
+                if let error = error {
+                    print("Error sending a message: \(error)")
+                }
+            }
+        } catch {
+            print("Error encoding JSON: \(error.localizedDescription)")
+        }
+    }
+    
     func makeInference() {
-        guard let url = URL(string: "https://547e-171-66-12-188.ngrok-free.app/query") else { return }
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)query") else { return }
         guard let capturedImage,
               let frameB64 = capturedImage.base64EncodedString() else { return }
         
