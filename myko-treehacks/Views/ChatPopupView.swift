@@ -70,7 +70,7 @@ private struct MessageBubble: View {
                 .foregroundStyle(isUser ? Color.white : Color.primary)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(isUser ? MykoColors.biologyBase : Color.white.opacity(0.6))
+                        .fill(isUser ? MykoColors.leafBase : Color.white.opacity(0.6))
                 )
 
             if !isUser { Spacer(minLength: 30) }

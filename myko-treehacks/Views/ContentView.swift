@@ -149,6 +149,7 @@ private struct ChatComposerBar: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
             }
+            .tint(MykoColors.blush)
             .buttonStyle(.bordered)
             .accessibilityLabel("Close chat")
 
@@ -168,7 +169,7 @@ private struct ChatComposerBar: View {
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(.bordered)
-            .tint(isRecording ? .red : MykoColors.biologyBase)
+            .tint(isRecording ? .red : MykoColors.leafBase)
             .accessibilityLabel("Dictate message")
 
             Button {
@@ -178,6 +179,7 @@ private struct ChatComposerBar: View {
                     .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
+            .tint(MykoColors.leafBase)
             .disabled(!canSend)
             .accessibilityLabel("Send message")
         }
