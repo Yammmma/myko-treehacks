@@ -13,7 +13,6 @@ struct ChatPopupView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
@@ -38,11 +37,6 @@ struct ChatPopupView: View {
         }
         // Keep the container fully transparent so only message bubbles are visible.
         .background(.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
