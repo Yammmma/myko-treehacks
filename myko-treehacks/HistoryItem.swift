@@ -5,7 +5,6 @@
 //  Created by Amy Sun Key on 2/14/26.
 //
 
-
 import Foundation
 import Combine
 import UIKit
@@ -15,12 +14,14 @@ struct HistoryItem: Codable, Identifiable, Equatable {
     let createdAt: Date
     let imagePath: String
     var title: String
+    var isFavorite: Bool
 
-        init(id: UUID, createdAt: Date, imagePath: String, title: String = "Microscope Capture") {
+        init(id: UUID, createdAt: Date, imagePath: String, title: String = "Microscope Capture", isFavorite: Bool = false) {
             self.id = id
             self.createdAt = createdAt
             self.imagePath = imagePath
             self.title = title
+            self.isFavorite = isFavorite
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -28,6 +29,7 @@ struct HistoryItem: Codable, Identifiable, Equatable {
             case createdAt
             case imagePath
             case title
+            case isFavorite
         }
 
         init(from decoder: Decoder) throws {
@@ -36,6 +38,7 @@ struct HistoryItem: Codable, Identifiable, Equatable {
             createdAt = try container.decode(Date.self, forKey: .createdAt)
             imagePath = try container.decode(String.self, forKey: .imagePath)
             title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Microscope Capture"
+            isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
         }
 }
 
@@ -68,6 +71,23 @@ final class HistoryStore: ObservableObject {
         historyDirectory.appendingPathComponent(item.imagePath)
     }
 
+    func toggleFavorite(for item: HistoryItem) {
+        setFavorite(!item.isFavorite, for: item.id)
+    }
+
+    func setFavorite(_ isFavorite: Bool, for itemID: HistoryItem.ID) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        var updated = items
+        updated[index].isFavorite = isFavorite
+        items = updated
+
+        do {
+            try persistMetadata()
+        } catch {
+            // If persistence fails, keep in-memory state so UI still reflects user's action.
+        }
+    }
+
     private var historyDirectory: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let historyDirectory = documents.appendingPathComponent("History", isDirectory: true)
@@ -93,6 +113,7 @@ final class HistoryStore: ObservableObject {
             items = decoded.sorted { $0.createdAt > $1.createdAt }
         } catch {
             items = []
+            return
         }
     }
 

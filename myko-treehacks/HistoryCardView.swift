@@ -17,19 +17,35 @@ struct HistoryCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Group {
-                if let thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.gray.opacity(0.12))
-                } else {
-                    ZStack {
-                        Color.gray.opacity(0.12)
-                        ProgressView()
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let thumbnail {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.gray.opacity(0.12))
+                    } else {
+                        ZStack {
+                            Color.gray.opacity(0.12)
+                            ProgressView()
+                        }
                     }
                 }
+
+                Button {
+                    appState.historyStore.toggleFavorite(for: item)
+                } label: {
+                    Image(systemName: item.isFavorite ? "star.fill" : "star")
+                        .font(.headline)
+                        .foregroundStyle(item.isFavorite ? .yellow : .white)
+                        .padding(8)
+                        .background(.black.opacity(0.6), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .highPriorityGesture(TapGesture())
+                .padding(8)
             }
             .frame(height: 150)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
