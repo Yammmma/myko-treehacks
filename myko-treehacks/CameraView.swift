@@ -12,6 +12,9 @@ import CoreImage
 import CoreVideo
 
 struct CameraView: View {
+    var onImageCaptured: ((UIImage) -> Void)? = nil
+    var captureTrigger: Int = 0
+    
     @State private var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @State private var showSettingsAlert = false
     
@@ -24,7 +27,13 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                CameraPreview(currentZoom: $currentZoom, totalZoom: $totalZoom, capturedImage: $capturedImage, isCapturing: $isCapturing)
+                CameraPreview(
+                    currentZoom: $currentZoom,
+                    totalZoom: $totalZoom,
+                    capturedImage: $capturedImage,
+                    isCapturing: $isCapturing,
+                    onImageCaptured: onImageCaptured
+                )
                     .ignoresSafeArea()
                     .clipShape(Circle())
                     .overlay(alignment: .bottom) {
@@ -84,6 +93,10 @@ struct CameraView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
+        .onChange(of: captureTrigger) { _, _ in
+            guard authorizationStatus == .authorized else { return }
+            isCapturing = true
+        }
         .gesture(
             MagnifyGesture()
                 .onChanged { value in
@@ -119,6 +132,7 @@ private struct CameraPreview: UIViewRepresentable {
     @Binding var totalZoom: Double
     @Binding var capturedImage: UIImage?
     @Binding var isCapturing: Bool
+    let onImageCaptured: ((UIImage) -> Void)?
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -133,6 +147,9 @@ private struct CameraPreview: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self.capturedImage = image
                     self.isCapturing = false
+                    if let image {
+                        self.onImageCaptured?(image)
+                    }
                     self.makeInference()
                 }
             }

@@ -16,11 +16,12 @@ struct ContentView: View {
     @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
+    @State private var captureTrigger = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            CameraView()
-
+            CameraView(onImageCaptured: handleCapturedImage, captureTrigger: captureTrigger)
+            
             VStack(spacing: 12) {
                 Spacer()
 
@@ -40,6 +41,16 @@ struct ContentView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 10)
                 }
+            }
+            if showSavedToast {
+                Text("Saved to History")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.28), lineWidth: 1))
+                    .padding(.bottom, chat.isChatExpanded ? 88 : 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chat.isChatExpanded)
@@ -83,7 +94,7 @@ struct ContentView: View {
 
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        // TODO: hook up capture action later
+                        captureTrigger += 1
                     } label: {
                         Image(systemName: "camera.fill")
                     }
@@ -114,6 +125,28 @@ struct ContentView: View {
         }, message: {
             Text(transcriptionError ?? "Unknown error")
         })
+        .alert("Save Failed", isPresented: .constant(captureError != nil), actions: {
+                    Button("OK") { captureError = nil }
+                }, message: {
+                    Text(captureError ?? "Unknown error")
+                })
+            }
+
+
+            @MainActor
+            private func handleCapturedImage(_ image: UIImage) {
+                do {
+                    try appState.historyStore.save(image: image)
+                    showSavedToast = true
+                    captureError = nil
+
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.5))
+                        showSavedToast = false
+                    }
+                } catch {
+                    captureError = "Couldn't save screenshot to History."
+                }
     }
 
     @MainActor
