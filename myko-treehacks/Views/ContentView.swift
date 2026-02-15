@@ -26,7 +26,7 @@ Use technical pathology language, avoid hedging, and do not ask for additional i
 
 private let screenshotTitlePrompt = """
 You are generating a very short title for a saved microscope screenshot in the Myko camera view.
-Return only a 1-3 word title that captures the key visible finding.
+Return only a 1-2 word title that captures the key visible finding.
 Use concise technical wording and no punctuation.
 """
 
