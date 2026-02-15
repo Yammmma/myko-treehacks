@@ -23,7 +23,9 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                ZStack {
+                VStack {
+                    Spacer()
+                    
                     if let capturedImage = endpoint.capturedImage {
                         Image(uiImage: endpoint.annotatedImage ?? capturedImage)
                             .resizable()
@@ -33,7 +35,10 @@ struct CameraView: View {
                             .progressViewStyle(.circular)
                             .padding()
                     }
+                    
+                    Spacer()
                 }
+                .padding()
             case .notDetermined:
                 VStack(spacing: 16) {
                     Text("Camera Access Required")

@@ -13,7 +13,7 @@ import AVFoundation
 import CoreImage
 import CoreVideo
 
-let ENDPOINT_URL_BASE = "purple-islands-draw.loca.lt"
+let ENDPOINT_URL_BASE = "extrusile-obdulia-preinductive.ngrok-free.dev"
 
 final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var capturedImage: UIImage? = nil
@@ -61,7 +61,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         setupWebSocket()
         
         // Continuous capture loop for WebSocket Streaming
-        Timer.scheduledTimer(withTimeInterval: 1/5, repeats: true) { [self] _ in
+        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { [self] _ in
             captureImage(mode: .stream)
         }
     }
@@ -105,16 +105,15 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     
     // 2. Recursive Listener
     private func listenForMessages() {
-        webSocketTask?.receive { [weak self] result in
-            guard let self = self else { return }
-            
+        webSocketTask?.receive { [self] result in
             switch result {
             case .success(let message):
                 self.handleMessage(message)
-                self.listenForMessages() // Recursion
             case .failure(let error):
                 print("❌ WebSocket Receive Error: \(error)")
             }
+            
+            self.listenForMessages() // Recursion
         }
     }
     
@@ -130,14 +129,13 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             }
             
             if let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters),
-               let image = UIImage(data: imageData) {
-                DispatchQueue.main.async { self.annotatedImage = image }
+               let image = UIImage(data: imageData),
+               let cgImage = image.cgImage,
+               let masked = circularMaskedImage(from: cgImage) {
+                DispatchQueue.main.async { self.annotatedImage = UIImage(cgImage: masked) }
             }
-        case .data(let data):
-            if let image = UIImage(data: data) {
-                DispatchQueue.main.async { self.annotatedImage = image }
-            }
-        @unknown default: break
+        default:
+            break
         }
     }
     
@@ -275,12 +273,11 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         context.setShouldAntialias(true)
         
         let radius = CGFloat(size) / 2.0
-        let center = CGPoint(x: CGFloat(width) / 2.0, y: CGFloat(height) / 2.0)
         let rect = CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2)
         context.addEllipse(in: rect)
         context.clip()
         
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(cgImage, in: CGRect(x: (size - max(width, height)) / 2, y: 0, width: width, height: height))
         return context.makeImage()
     }
     
