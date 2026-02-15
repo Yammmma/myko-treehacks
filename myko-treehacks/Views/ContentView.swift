@@ -195,12 +195,16 @@ struct ContentView: View {
         }
         .onAppear {
             endpoint.onCapture = handleCapturedImage
+            endpoint.openEndpoint()
             handsFreeController.updateMode(
                 enabled: true,
                 appIsForegrounded: scenePhase == .active,
                 onCommandUpdate: updateHandsFreeDraft,
                 onExecute: runHandsFreeCommand
             )
+        }
+        .onDisappear {
+            endpoint.closeEndpoint()
         }
         .onChange(of: scenePhase) { _, phase in
             handsFreeController.updateForegroundState(isForegrounded: phase == .active)

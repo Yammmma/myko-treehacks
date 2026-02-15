@@ -31,6 +31,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
     private let ciContext = CIContext()
     private var pendingSnapshotRequests: [((UIImage?) -> Void)] = []
+    private var intervalTimer: Timer? = nil
     
     // --- Network Properties ---
     private var webSocketTask: URLSessionWebSocketTask?
@@ -56,16 +57,8 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     
     init(onCapture: ((UIImage) -> Void)? = nil) {
         super.init()
-        
         self.onCapture = onCapture
-        
-        configureSession()
-        setupWebSocket()
-        
-        // Continuous capture loop for WebSocket Streaming
-        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { [self] _ in
-            captureImage(mode: .stream)
-        }
+//        openEndpoint()
     }
     
     func captureImage(mode: CaptureMode, prompt: String? = nil) {
@@ -345,12 +338,51 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         requesters.forEach { $0(uiImage) }
     }
     
-    deinit {
+    func openEndpoint() {
+        configureSession()
+        setupWebSocket()
+        
+        // Continuous capture loop for WebSocket Streaming
+        intervalTimer = Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { [self] _ in
+            captureImage(mode: .stream)
+        }
+    }
+    
+    func closeEndpoint() {
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        sendClear()
         if deviceLockAcquired {
             device?.unlockForConfiguration()
         }
         if session.isRunning { session.stopRunning() }
+        intervalTimer?.invalidate()
+        intervalTimer = nil
+    }
+    
+    func sendClear() {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/clear") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ HTTP Error: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("Clear call received with status \(httpResponse.statusCode)")
+            }
+        }
+        
+        task.resume()
+    }
+    
+    deinit {
+        closeEndpoint()
     }
 }
 
