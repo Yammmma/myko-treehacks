@@ -22,21 +22,18 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
+    @StateObject private var endpoint = EndpointViewModel()
 //    @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
     @StateObject private var handsFreeController = HandsFreeModeController()
     
 //    @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
-    @State private var captureTrigger = 0
     @State private var handsFreeEnabled = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            CameraView(
-                captureTrigger: captureTrigger,
-                onCapture: handleCapturedImage
-            )
+            CameraView(endpoint: endpoint)
             VStack(spacing: 12) {
                 Spacer()
                 
@@ -143,7 +140,7 @@ struct ContentView: View {
                 
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        captureTrigger += 1
+                        endpoint.captureImage(mode: .manualCapture)
                     } label: {
                         Image(systemName: "camera.fill")
                     }
@@ -183,6 +180,9 @@ struct ContentView: View {
         .onReceive(receiveMessage) { message in
             chat.receivedMessage(message)
         }
+        .onAppear {
+            endpoint.onCapture = handleCapturedImage
+        }
         .onChange(of: scenePhase) { _, phase in
             handsFreeController.updateForegroundState(isForegrounded: phase == .active)
         }
@@ -208,6 +208,9 @@ struct ContentView: View {
                 try? await Task.sleep(for: .seconds(1.5))
                 showSavedToast = false
             }
+            
+            // Debug photo capture
+            UIImageWriteToSavedPhotosAlbum(image, self, nil, nil)
         } catch {
             captureError = "Couldn't save screenshot to History."
         }

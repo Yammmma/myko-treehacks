@@ -1,213 +1,165 @@
 import os
-import io
-import base64
 import json
-import logging
-import openai
-from PIL import Image, ImageDraw
-from tracker import Tracker
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-MAX_AGENT_ITERATIONS = 10
-MAX_CANDIDATE_MASKS = 25
-MIN_MASK_AREA_RATIO = 0.001   # Filter masks smaller than 0.1% of image
-MAX_MASK_AREA_RATIO = 0.90    # Filter masks larger than 90% of image (background)
-
+import time
+from openai import AsyncOpenAI
 
 class Agent:
-    def __init__(self):
-        logger.info("Initializing Agent...")
+    def __init__(self, tracker, debug: bool = True):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            logger.error("OPENAI_API_KEY environment variable is missing.")
-            raise ValueError("OPENAI_API_KEY is not set!")
+            raise ValueError("OPENAI_API_KEY not set")
 
-        self.client = openai.OpenAI(api_key=api_key)
-        self.tracker = Tracker()
+        self.client = AsyncOpenAI(api_key=api_key)
+        self.tracker = tracker
+        self.debug = debug
 
-        self.system_message = {
-            "role": "system",
-            "content": (
-                "You are Myko, a bio-image analyst agent that uses SAM 2 for object "
-                "segmentation and tracking under a microscope.\n\n"
-                "Workflow:\n"
-                "1. When the user asks you to track or identify something, call "
-                "`get_candidates` to generate all segmentable masks from the current frame.\n"
-                "2. You will receive a list of candidate masks with bounding-box coordinates "
-                "and an annotated image with numbered boxes. Analyze them to determine which "
-                "mask ID(s) correspond to the user's request.\n"
-                "3. Call `track_object` with the correct mask_id and a descriptive label.\n"
-                "4. Confirm to the user that tracking has started.\n\n"
-                "If the user asks a general question about the image (not tracking), "
-                "answer directly without calling tools."
-            )
-        }
-
-        self.tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_candidates",
-                    "description": (
-                        "Run automatic segmentation on the current frame to discover all "
-                        "segmentable objects. Returns a text list of candidates with bounding "
-                        "boxes and an annotated image with numbered IDs."
-                    ),
-                    "parameters": {"type": "object", "properties": {}, "required": []}
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "track_object",
-                    "description": (
-                        "Start real-time tracking for a specific mask by its ID number. "
-                        "Use this after reviewing the annotated candidates image."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "mask_id": {
-                                "type": "integer",
-                                "description": "The numeric ID of the mask to track (from the annotated image)."
-                            },
-                            "label": {
-                                "type": "string",
-                                "description": "A short descriptive label for the tracked object (e.g. 'red blood cell', 'nucleus')."
-                            }
+        self.tools = [{
+            "type": "function",
+            "function": {
+                "name": "update_tracking",
+                "description": (
+                    "Add or remove cell segmentation overlays on the live microscope feed. "
+                    "The backend detects stained cells/structures via computer vision. "
+                    "Query strings can include a region like 'bottom', 'top', 'left', 'right' "
+                    "to limit segmentation to that part of the slide. "
+                    "Examples: 'cells at the bottom', 'muscle cells', 'all cells'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "add": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Descriptive queries for what to segment. Include region hints if the user specifies a location (e.g. 'cells at the bottom', 'tissue on the left')."
                         },
-                        "required": ["mask_id", "label"]
+                        "remove": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Queries whose overlays should be removed."
+                        }
                     }
                 }
             }
-        ]
-        self.current_candidates = {}
+        }]
 
-    def query(self, user_input: str, frame_b64: str) -> str:
-        logger.info(f"Received query: {user_input}")
-
-        # Ensure data URI prefix for GPT-4o vision
-        if not frame_b64.startswith("data:image"):
-            frame_b64 = f"data:image/jpeg;base64,{frame_b64}"
-
-        # --- Fresh conversation per query (prevents unbounded token growth) ---
-        messages = [
-            self.system_message,
+        self.messages = [
             {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_input},
-                    {"type": "image_url", "image_url": {"url": frame_b64}}
-                ],
+                "role": "system",
+                "content": (
+                    "You are Myko, an expert AI histopathology assistant with deep "
+                    "knowledge of cell morphology, tissue architecture, and clinical "
+                    "pathology. You speak with authority and technical precision. "
+                    "You ALWAYS provide a definitive, detailed answer — never say you "
+                    "'can't' identify something or need more information. Analyse the "
+                    "image you are given and describe what you observe confidently.\n\n"
+                    "TOOL USAGE RULES — follow these strictly:\n"
+                    "• ONLY call 'update_tracking' when the user gives an explicit ACTION "
+                    "command to segment, highlight, overlay, track, mark, show, "
+                    "or remove cells on the live feed.\n"
+                    "  Examples: 'segment the cells at the bottom', "
+                    "'highlight all cells', 'show the muscle fibers', "
+                    "'remove the overlay'.\n"
+                    "• NEVER call the tool for questions or analysis requests "
+                    "such as 'what cells are in this image?', 'describe the "
+                    "tissue', 'how many cells?', 'what do you see?'. "
+                    "For those, analyse the image directly and give a confident, "
+                    "technical answer.\n\n"
+                    "When calling the tool, include spatial hints from the user's "
+                    "request in the query string (e.g. 'cells at the bottom', "
+                    "'tissue on the right'). To segment everything use 'all cells'.\n\n"
+                    "IMPORTANT: The current microscope image is ALWAYS attached to "
+                    "every message. You can always see it. NEVER say you cannot see "
+                    "the image, never ask the user to provide or send an image, "
+                    "and never say you need additional input. Just analyse what you see.\n\n"
+                    "To remove overlays, use the 'remove' field with the same query."
+                )
             }
         ]
-        self.current_candidates = {}
-        pending_annotated_b64 = None  # Image to inject after tool results
 
-        for iteration in range(MAX_AGENT_ITERATIONS):
-            logger.info(f"Agent iteration {iteration + 1}/{MAX_AGENT_ITERATIONS}")
-            response = self.client.chat.completions.create(
+    async def query(self, prompt: str, frame_b64: str | None = None) -> str:
+        if self.debug:
+            print(f"ℹ️ Agent received prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+
+        # Auto-attach the latest WebSocket frame if the caller didn't provide one
+        if not frame_b64 and self.tracker.latest_frame is not None:
+            import base64, cv2
+            _, buf = cv2.imencode('.jpg', self.tracker.latest_frame)
+            frame_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
+            if self.debug:
+                print("ℹ️ Auto-attached latest frame for vision")
+
+        current_message = {"role": "user", "content": prompt}
+        if frame_b64:
+            current_message["content"] = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": frame_b64}}
+            ]
+
+        start_time = time.time()
+        try:
+            response = await self.client.chat.completions.create(
                 model="gpt-4o",
-                messages=messages,
+                messages=self.messages + [current_message],
                 tools=self.tools,
                 tool_choice="auto"
             )
+        except Exception as e:
+            print(f"⚠️ Agent query error: {e}")
+            raise e
 
-            msg = response.choices[0].message
-            messages.append(msg)
+        elapsed = time.time() - start_time
+        if self.debug:
+            print(f"ℹ️ Agent query processed in {elapsed:.3f}s")
 
-            if not msg.tool_calls:
-                logger.info("No tool calls returned. Ending loop.")
-                return msg.content or "I couldn't generate a response."
+        message = response.choices[0].message
 
-            # --- Process every tool call in this response ---
-            for tool_call in msg.tool_calls:
-                fn_name = tool_call.function.name
-                args = json.loads(tool_call.function.arguments)
-                logger.info(f"Tool Call: {fn_name} with args: {args}")
+        # Execute tool calls
+        if message.tool_calls:
+            tool_results = []
+            for tool_call in message.tool_calls:
+                if tool_call.function.name == "update_tracking":
+                    args = json.loads(tool_call.function.arguments)
+                    result = await self.tracker.handle_tool_call(
+                        add=args.get("add"),
+                        remove=args.get("remove"),
+                        frame_b64=frame_b64
+                    )
+                    tool_results.append(result)
+                    if self.debug:
+                        print(f"✅ Tool call: {args} → {result}")
 
-                if fn_name == "get_candidates":
-                    raw_masks, original_img = self.tracker.get_agnostic_masks(frame_b64)
-
-                    # Filter by area to remove noise and background
-                    image_area = original_img.width * original_img.height
-                    filtered = [
-                        m for m in raw_masks
-                        if MIN_MASK_AREA_RATIO * image_area <= m['area'] <= MAX_MASK_AREA_RATIO * image_area
-                    ]
-                    # Sort by quality and cap count
-                    filtered.sort(key=lambda m: m.get('predicted_iou', 0), reverse=True)
-                    filtered = filtered[:MAX_CANDIDATE_MASKS]
-
-                    logger.info(f"Filtered to {len(filtered)} candidates from {len(raw_masks)} raw masks.")
-
-                    # Annotate image with numbered bounding boxes
-                    annotated_img = original_img.copy()
-                    draw = ImageDraw.Draw(annotated_img)
-                    self.current_candidates = {}
-
-                    descriptions = []
-                    for i, mask_data in enumerate(filtered):
-                        mask_id = i + 1
-                        self.current_candidates[mask_id] = mask_data
-                        x, y, w, h = mask_data['bbox']
-                        draw.rectangle([int(x), int(y), int(x + w), int(y + h)], outline="red", width=2)
-                        draw.text((int(x), int(y) - 12), str(mask_id), fill="yellow")
-                        descriptions.append(
-                            f"  ID {mask_id}: bbox=({int(x)},{int(y)},{int(w)},{int(h)}), area={mask_data['area']}"
-                        )
-
-                    buff = io.BytesIO()
-                    annotated_img.save(buff, format="JPEG", quality=85)
-                    annotated_b64 = base64.b64encode(buff.getvalue()).decode('utf-8')
-                    buff.close()
-
-                    summary = f"Found {len(filtered)} candidate masks:\n" + "\n".join(descriptions)
-
-                    # Tool result MUST be a string (not multimodal)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": summary
-                    })
-                    # Queue annotated image for injection after all tool results
-                    pending_annotated_b64 = annotated_b64
-
-                elif fn_name == "track_object":
-                    mid = args["mask_id"]
-                    label = args.get("label", f"object_{mid}")
-                    if mid in self.current_candidates:
-                        self.tracker.add_target(mid, self.current_candidates[mid], label)
-                        tool_result = f"Tracking started for mask ID {mid} with label '{label}'."
-                        logger.info(f"Successfully started tracking for mask_id {mid}.")
-                    else:
-                        available = list(self.current_candidates.keys())
-                        tool_result = f"ID {mid} not found. Available IDs: {available}"
-                        logger.warning(f"mask_id {mid} not found. Available: {available}")
-
-                    messages.append({
-                        "role": "tool", "tool_call_id": tool_call.id, "content": tool_result
-                    })
-
-                else:
-                    messages.append({
-                        "role": "tool", "tool_call_id": tool_call.id,
-                        "content": f"Unknown function: {fn_name}"
-                    })
-
-            # After ALL tool results for this turn, inject the annotated image
-            # as a user message so GPT-4o can actually see it
-            if pending_annotated_b64:
-                messages.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Here is the annotated image with numbered mask candidates. Select the correct one to track."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{pending_annotated_b64}"}}
-                    ]
+            # Add the assistant message + tool results, then get a final response
+            self.messages.append(current_message)
+            self.messages.append({
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name,
+                                  "arguments": tc.function.arguments}}
+                    for tc in message.tool_calls
+                ],
+            })
+            for i, tool_call in enumerate(message.tool_calls):
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_results[i] if i < len(tool_results) else "",
                 })
-                pending_annotated_b64 = None
 
-        logger.warning("Agent hit max iterations without resolving.")
-        return "I wasn't able to complete the analysis. Please try again with a simpler request."
+            # Let the model summarise the result for the user
+            followup = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=self.messages,
+            )
+            assistant_text = followup.choices[0].message.content or "; ".join(tool_results)
+            self.messages.append({"role": "assistant", "content": assistant_text})
+        else:
+            assistant_text = message.content or "I processed your request."
+            self.messages.append(current_message)
+            self.messages.append({"role": "assistant", "content": assistant_text})
+
+        if self.debug:
+            print(f"ℹ️ Agent response: {assistant_text[:100]}{'...' if len(assistant_text) > 100 else ''}")
+
+        return assistant_text

@@ -1,43 +1,67 @@
 import asyncio
 import uvicorn
-import base64
-import json
-import logging
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from agent import Agent
 from tracker import Tracker
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import json
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-agent = Agent()
+# Init Global Instances
 tracker = Tracker()
+agent = Agent(tracker, debug=True)
 
 class ChatRequest(BaseModel):
     prompt: str
-    frame: str
+    frame: str | None = None
 
 @app.post("/query")
-async def chat_endpoint(request: ChatRequest):
-    logger.info(f"POST /query received. Prompt: {request.prompt[:50]}...")
+async def query_endpoint(request: ChatRequest):
+    # Pass prompt to agent. Agent will use tracker.latest_frame if request.frame is None
+    response = await agent.query(request.prompt, request.frame)
+    return {"response": response}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("✅ WS Connected")
+
     try:
-        response_text = await asyncio.to_thread(agent.query, request.prompt, request.frame)
-        return {"response": response_text}
+        while True:
+            # 1. Receive Frame
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect()
+
+            base64_frame = None
+            if "text" in message:
+                try:
+                    data = json.loads(message["text"])
+                    base64_frame = data.get("frame")
+                except:
+                    base64_frame = message["text"] # Handle raw string case
+
+            if base64_frame:
+                # 2. Process (Decode -> Store -> Overlay -> Encode)
+                edited_frame = tracker.process_frame(base64_frame)
+                
+                # 3. Send Back
+                await websocket.send_text(edited_frame)
+
+    except WebSocketDisconnect:
+        print("❌ WS Disconnected")
     except Exception as e:
-        logger.error(f"Error in chat_endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"⚠️ WS Error: {e}")
 
 @app.websocket("/ws")
 async def video_endpoint(websocket: WebSocket):
@@ -83,5 +107,4 @@ async def video_endpoint(websocket: WebSocket):
         logger.error(f"❌ Fatal WebSocket Error: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    logger.info("Starting server on 0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

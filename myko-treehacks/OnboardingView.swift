@@ -14,7 +14,7 @@ struct OnboardingView: View {
             OnboardingPage(
                 imageName: "myko-micro",
                 title: "AI Microscopy in Your Pocket",
-                body1: "Capture and analyze microscopic samples instantly with on-device intelligence.",
+                bodyText: "Capture and analyze microscopic samples instantly with on-device intelligence.",
                 buttonTitle: "Continue",
                 pageIndex: 0,
                 currentPage: $currentPage,
@@ -25,7 +25,7 @@ struct OnboardingView: View {
             OnboardingPage(
                 imageName: "myko-position1",
                 title: "Camera Access Required",
-                body1: "Myko uses your camera to capture microscope images for analysis.",
+                bodyText: "Myko uses your camera to capture microscope images for analysis.",
                 buttonTitle: cameraButtonTitle,
                 pageIndex: 1,
                 currentPage: $currentPage,
@@ -36,7 +36,7 @@ struct OnboardingView: View {
             OnboardingPage(
                 imageName: "myko-position2",
                 title: "Voice Dictation",
-                body1: "Use your voice to describe samples and add notes hands-free.",
+                bodyText: "Use your voice to describe samples and add notes hands-free.",
                 buttonTitle: micButtonTitle,
                 pageIndex: 2,
                 currentPage: $currentPage,
@@ -49,7 +49,7 @@ struct OnboardingView: View {
             OnboardingPage(
                 imageName: "myko-position3",
                 title: "You’re Ready to Scan",
-                body1: "Place your sample under the microscope and tap Scan to begin.",
+                bodyText: "Place your sample under the microscope and tap Scan to begin.",
                 buttonTitle: "Start Using Myko",
                 pageIndex: 3,
                 currentPage: $currentPage,
@@ -135,7 +135,7 @@ struct OnboardingView: View {
 private struct OnboardingPage: View {
     let imageName: String
     let title: String
-    let body1: String
+    let bodyText: String
     let buttonTitle: String
     let pageIndex: Int
     @Binding var currentPage: Int
@@ -163,7 +163,7 @@ private struct OnboardingPage: View {
                 .padding(.top, 24)
                 .padding(.horizontal, 24)
 
-            Text(body1)
+            Text(bodyText)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
