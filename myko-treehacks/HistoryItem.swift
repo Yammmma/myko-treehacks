@@ -14,32 +14,43 @@ struct HistoryItem: Codable, Identifiable, Hashable, Equatable {
     let createdAt: Date
     let imagePath: String
     var title: String
+    var notes: String
     var isFavorite: Bool
-
-        init(id: UUID, createdAt: Date, imagePath: String, title: String = "Microscope Capture", isFavorite: Bool = false) {
-            self.id = id
-            self.createdAt = createdAt
-            self.imagePath = imagePath
-            self.title = title
-            self.isFavorite = isFavorite
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case createdAt
-            case imagePath
-            case title
-            case isFavorite
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            id = try container.decode(UUID.self, forKey: .id)
-            createdAt = try container.decode(Date.self, forKey: .createdAt)
-            imagePath = try container.decode(String.self, forKey: .imagePath)
-            title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Microscope Capture"
-            isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
-        }
+        
+    init(
+        id: UUID,
+        createdAt: Date,
+        imagePath: String,
+        title: String = "Microscope Capture",
+        notes: String = "",
+        isFavorite: Bool = false
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.imagePath = imagePath
+        self.title = title
+        self.notes = notes
+        self.isFavorite = isFavorite
+    }
+    
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case imagePath
+        case title
+        case notes
+        case isFavorite
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        imagePath = try container.decode(String.self, forKey: .imagePath)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Microscope Capture"
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+    }
 }
 
 @MainActor
@@ -51,8 +62,8 @@ final class HistoryStore: ObservableObject {
     init() {
         loadItems()
     }
-
-    func save(image: UIImage, title: String = "Microscope Capture") throws {
+    @discardableResult
+    func save(image: UIImage, title: String = "Microscope Capture") throws -> HistoryItem {
         guard let pngData = image.pngData() else {
             throw CocoaError(.fileWriteUnknown)
         }
@@ -65,6 +76,7 @@ final class HistoryStore: ObservableObject {
         let newItem = HistoryItem(id: id, createdAt: Date(), imagePath: fileName, title: title)
         items.insert(newItem, at: 0)
         try persistMetadata()
+        return newItem
     }
 
     func imageURL(for item: HistoryItem) -> URL {
@@ -80,6 +92,18 @@ final class HistoryStore: ObservableObject {
         var updated = items
         updated[index].isFavorite = isFavorite
         items = updated
+
+        do {
+            try persistMetadata()
+        } catch {
+            // If persistence fails, keep in-memory state so UI still reflects user's action.
+        }
+    }
+    
+    func updateNotes(for itemID: HistoryItem.ID, notes: String) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        items[index].notes = notes
+        items = items
 
         do {
             try persistMetadata()

@@ -55,10 +55,17 @@ struct HistoryCardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            if !item.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(item.notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            
         }
         .frame(maxWidth: .infinity, minHeight: 230, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+        .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(.systemBackground))

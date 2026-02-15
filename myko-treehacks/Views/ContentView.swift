@@ -9,6 +9,15 @@ import SwiftUI
 import UIKit
 import Combine
 
+private struct NotesInferenceRequest: Codable {
+    let prompt: String
+    let frame: String
+}
+
+private struct NotesInferenceResponse: Codable {
+    let response: String
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
@@ -182,9 +191,18 @@ struct ContentView: View {
     @MainActor
     private func handleCapturedImage(_ image: UIImage) {
         do {
-            try appState.historyStore.save(image: image)
+            let savedItem = try appState.historyStore.save(image: image)
             showSavedToast = true
             captureError = nil
+
+            Task {
+                let generatedNotes = await generateNotes(for: image)
+                guard let generatedNotes else { return }
+
+                await MainActor.run {
+                    appState.historyStore.updateNotes(for: savedItem.id, notes: generatedNotes)
+                }
+            }
             
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))
@@ -192,6 +210,31 @@ struct ContentView: View {
             }
         } catch {
             captureError = "Couldn't save screenshot to History."
+        }
+    }
+    
+    private func generateNotes(for image: UIImage) async -> String? {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return nil }
+        guard let frameB64 = image.base64EncodedString() else { return nil }
+
+        let requestPayload = NotesInferenceRequest(
+            prompt: "Write 1–2 concise sentences describing what is visible in this microscope image. If uncertain, say 'Uncertain' and suggest what to adjust.",
+            frame: frameB64
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestPayload)
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoded = try JSONDecoder().decode(NotesInferenceResponse.self, from: data)
+            let trimmed = decoded.response.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return String(trimmed.prefix(200))
+        } catch {
+            return nil
         }
     }
     

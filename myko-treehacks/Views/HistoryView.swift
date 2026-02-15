@@ -99,6 +99,7 @@ struct HistoryView: View {
 struct HistoryDetailView: View {
     @EnvironmentObject private var appState: AppState
     private let itemID: HistoryItem.ID
+    @State private var draftNotes: String = ""
 
     init(item: HistoryItem) {
         self.itemID = item.id
@@ -112,13 +113,48 @@ struct HistoryDetailView: View {
         Group {
             if let item,
                let image = UIImage(contentsOfFile: appState.historyStore.imageURL(for: item).path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.9))
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black.opacity(0.9))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Notes")
+                                .font(.headline)
+
+                            TextEditor(text: $draftNotes)
+                                .frame(minHeight: 120)
+                                .padding(6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color(.systemGray6))
+                                )
+                                .onChange(of: draftNotes) { _, updatedValue in
+                                    appState.historyStore.updateNotes(for: item.id, notes: updatedValue)
+                                }
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                    }
+                    .padding()
+                }
             } else {
                 ContentUnavailableView("Image unavailable", systemImage: "photo")
+            }
+        }
+        .onAppear {
+            draftNotes = item?.notes ?? ""
+        }
+        .onChange(of: item?.notes ?? "") { _, currentNotes in
+            if currentNotes != draftNotes {
+                draftNotes = currentNotes
             }
         }
         .navigationTitle(item?.title ?? "Capture")

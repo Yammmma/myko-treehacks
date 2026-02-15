@@ -188,7 +188,7 @@ private struct OnboardingPage: View {
                 Button(secondaryActionTitle, action: secondaryAction)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
             }
 
             Color.clear
