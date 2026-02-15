@@ -23,33 +23,29 @@ struct CameraView: View {
         ZStack {
             switch authorizationStatus {
             case .authorized:
-                VStack {
-                    Spacer()
-                    
-                    if let capturedImage = endpoint.capturedImage {
-                        GeometryReader { geometry in
-                            let image = endpoint.annotatedImage ?? capturedImage
-                            let previewBounds = CGRect(origin: .zero, size: geometry.size)
-                            let fittedBounds = aspectFitRect(for: image.size, in: previewBounds)
-                            
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            
-                            BoundingBoxOverlay(
-                                normalizedRect: $endpoint.boundingBoxNormalized,
-                                bounds: fittedBounds,
-                                isVisible: endpoint.isBoundingBoxVisible                           )
-                        }                    } else {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .padding()
-                        }
-                    
-                    Spacer()
+                if let capturedImage = endpoint.capturedImage {
+                    GeometryReader { geometry in
+                        let image = endpoint.annotatedImage ?? capturedImage
+                        let previewBounds = CGRect(origin: .zero, size: geometry.size)
+                        let fittedBounds = aspectFitRect(for: image.size, in: previewBounds)
+                        
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .rotationEffect(.degrees(-90))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        
+                        BoundingBoxOverlay(
+                            normalizedRect: $endpoint.boundingBoxNormalized,
+                            bounds: fittedBounds,
+                            isVisible: endpoint.isBoundingBoxVisible
+                        )
+                    }
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .padding()
                 }
-                .padding()
             case .notDetermined:
                 VStack(spacing: 16) {
                     Text("Camera Access Required")
