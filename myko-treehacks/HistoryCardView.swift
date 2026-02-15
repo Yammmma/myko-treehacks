@@ -24,8 +24,9 @@ struct HistoryCardView: View {
                         Image(uiImage: thumbnail)
                             .resizable()
                             .scaledToFit()
+                            .scaleEffect(0.9)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.gray.opacity(0.12))
+                            .background(Color.black)
                     } else {
                         ZStack {
                             Color.gray.opacity(0.12)
@@ -38,7 +39,7 @@ struct HistoryCardView: View {
                     onFavoriteTap?()
                 } label: {
                     Image(systemName: item.isFavorite ? "star.fill" : "star")
-                        .foregroundStyle(item.isFavorite ? .yellow : .black)
+                        .foregroundStyle(item.isFavorite ? .yellow : .white)
                         .padding(8)
                 }
                 .buttonStyle(.plain)
