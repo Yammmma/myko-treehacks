@@ -19,6 +19,8 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     @Published var capturedImage: UIImage? = nil
     @Published var annotatedImage: UIImage? = nil
     var onCapture: ((UIImage) -> Void)?
+    @Published var boundingBoxNormalized: CGRect = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
+    @Published var isBoundingBoxVisible = false
     
     // --- Camera Properties ---
     private let session = AVCaptureSession()
@@ -69,6 +71,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     func captureImage(mode: CaptureMode, prompt: String? = nil) {
         requestSnapshot { [self] image in
             guard let img = image else { return }
+            let analysisImage = imageWithBoundingBoxOverlay(from: img)
             
             DispatchQueue.main.async {
                 self.capturedImage = img
@@ -77,7 +80,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             // Route based on mode
             switch mode {
             case .stream:
-                sendFrameWS(image: img)
+                sendFrameWS(image: analysisImage)
                 break
             case .query:
                 guard let prompt else {
@@ -85,10 +88,16 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
                     return
                 }
                 
-                makeInferenceHTTP(prompt: prompt, image: img)
+                makeInferenceHTTP(prompt: prompt, image: analysisImage)
             case .manualCapture:
                 onCapture?(img)
             }
+        }
+    }
+    
+    func toggleBoundingBoxVisibility() {
+        DispatchQueue.main.async {
+            self.isBoundingBoxVisible.toggle()
         }
     }
     
@@ -132,7 +141,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
                let image = UIImage(data: imageData),
                let cgImage = image.cgImage,
                let masked = circularMaskedImage(from: cgImage) {
-                DispatchQueue.main.async { self.annotatedImage = UIImage(cgImage: masked) }
+                DispatchQueue.main.async { self.annotatedImage = UIImage(cgImage: masked, scale: 1, orientation: .right) }
             }
         default:
             break
@@ -229,6 +238,9 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
                 session.addOutput(videoOutput)
                 videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
             }
+            if let connection = videoOutput.connection(with: .video), connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
             
             self.session.commitConfiguration()
             if !self.session.isRunning {
@@ -281,6 +293,44 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         return context.makeImage()
     }
     
+    private func imageWithBoundingBoxOverlay(from image: UIImage) -> UIImage {
+        let normalizedRect: CGRect
+        let isVisible: Bool
+        if Thread.isMainThread {
+            normalizedRect = self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            isVisible = self.isBoundingBoxVisible
+        } else {
+            (normalizedRect, isVisible) = DispatchQueue.main.sync {
+                (
+                    self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1)),
+                    self.isBoundingBoxVisible
+                )
+            }
+        }
+
+        guard isVisible else { return image }
+
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+
+            let strokeRect = CGRect(
+                x: normalizedRect.minX * image.size.width,
+                y: normalizedRect.minY * image.size.height,
+                width: normalizedRect.width * image.size.width,
+                height: normalizedRect.height * image.size.height
+            ).integral
+
+            let path = UIBezierPath(rect: strokeRect)
+            UIColor.black.withAlphaComponent(0.08).setFill()
+            path.fill()
+
+            UIColor.white.setStroke()
+            path.lineWidth = 4
+            path.stroke()
+        }
+    }
+    
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard !pendingSnapshotRequests.isEmpty else { return }
         let requesters = pendingSnapshotRequests
@@ -291,7 +341,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             requesters.forEach { $0(nil) }
             return
         }
-        let uiImage = UIImage(cgImage: masked)
+        let uiImage = UIImage(cgImage: masked, scale: 1, orientation: .right)
         
 //            let uiImage = UIImage(named: "cell4")
         
@@ -304,5 +354,15 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             device?.unlockForConfiguration()
         }
         if session.isRunning { session.stopRunning() }
+    }
+}
+
+private extension CGRect {
+    func clamped(to bounds: CGRect) -> CGRect {
+        let minX = max(bounds.minX, min(self.minX, bounds.maxX))
+        let minY = max(bounds.minY, min(self.minY, bounds.maxY))
+        let maxX = max(minX, min(self.maxX, bounds.maxX))
+        let maxY = max(minY, min(self.maxY, bounds.maxY))
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }

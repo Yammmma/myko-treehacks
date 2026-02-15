@@ -6,6 +6,7 @@
 //
 import SwiftUI
 import UIKit
+import ImageIO
 
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
@@ -137,6 +138,7 @@ private struct FavoritesCarouselView: View {
 }
 
 private struct FavoriteHistoryCard: View {
+    @State private var thumbnail: UIImage?
     @EnvironmentObject private var appState: AppState
     let item: HistoryItem
     let cardWidth: CGFloat
@@ -151,23 +153,35 @@ private struct FavoriteHistoryCard: View {
             HistoryDetailView(item: item)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                Group {
-                    if let image = UIImage(contentsOfFile: appState.historyStore.imageURL(for: item).path) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipped()
-                    } else {
-                        LinearGradient(
-                            colors: [MykoColors.leafLight, MykoColors.leafBase.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+
+                ZStack(alignment: .topTrailing) {
+                    Group {
+                        if let thumbnail {
+                            Image(uiImage: thumbnail)
+                                .resizable()
+                                .scaledToFit()
+                                .scaleEffect(0.9)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.black)
+                        } else {
+                            ZStack {
+                                Color.gray.opacity(0.12)
+                                ProgressView()
+                            }
+                        }
                     }
+
+                    Button {
+                        appState.historyStore.toggleFavorite(for: item)
+                    } label: {
+                        Image(systemName: item.isFavorite ? "star.fill" : "star")
+                            .foregroundStyle(item.isFavorite ? .yellow : .white)
+                            .padding(8)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .frame(height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
@@ -175,24 +189,53 @@ private struct FavoriteHistoryCard: View {
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    
+                    if !item.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(item.notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(width: cardWidth, alignment: .leading)
-            .background(Color(.white), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+            .padding(8)
+            .frame(width: cardWidth, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+                )
         }
         .buttonStyle(.plain)
+        .task {
+            if thumbnail == nil {
+                thumbnail = downsampledImage(at: appState.historyStore.imageURL(for: item), maxDimension: 500)
+            }
+        }
+    }
+
+    private func downsampledImage(at url: URL, maxDimension: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else { return nil }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage)
     }
 }
 

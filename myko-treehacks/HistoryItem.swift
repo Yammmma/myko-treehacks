@@ -111,6 +111,39 @@ final class HistoryStore: ObservableObject {
             // If persistence fails, keep in-memory state so UI still reflects user's action.
         }
     }
+    
+    func delete(_ item: HistoryItem) {
+        items.removeAll { $0.id == item.id }
+
+        do {
+            try FileManager.default.removeItem(at: imageURL(for: item))
+        } catch {
+            print("Failed to delete image file for item \(item.id): \(error)")
+        }
+
+        do {
+            try persistMetadata()
+        } catch {
+            // Keep in-memory state updated even if persistence fails.
+        }
+    }
+
+    func delete(id: HistoryItem.ID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        delete(item)
+    }
+    
+    func updateTitle(for itemID: HistoryItem.ID, title: String) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        items[index].title = title
+        items = items
+
+        do {
+            try persistMetadata()
+        } catch {
+            // If persistence fails, keep in-memory state so UI still reflects user's action.
+        }
+    }
 
     private var historyDirectory: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
@@ -95,32 +96,70 @@ struct HistoryView: View {
     }
 }
 
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
 
 struct HistoryDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
     private let itemID: HistoryItem.ID
     @State private var draftNotes: String = ""
+    @State private var showShare = false
+    @State private var showDeleteConfirm = false
 
     init(item: HistoryItem) {
         self.itemID = item.id
     }
 
-    private var item: HistoryItem? {
+    private var currentItem: HistoryItem? {
         appState.historyStore.items.first(where: { $0.id == itemID })
+    }
+
+    private var imageURL: URL? {
+        guard let currentItem else { return nil }
+        return appState.historyStore.imageURL(for: currentItem)
+    }
+
+    private var loadedImage: UIImage? {
+        guard let imageURL else { return nil }
+        return UIImage(contentsOfFile: imageURL.path)
+    }
+
+    private var shareActivityItems: [Any] {
+        guard let currentItem, let imageURL else { return [] }
+        var activityItems: [Any] = ["Myko capture: \(currentItem.title)"]
+        if let loadedImage {
+            activityItems.append(loadedImage)
+        } else {
+            activityItems.append(imageURL)
+        }
+        return activityItems
     }
 
     var body: some View {
         Group {
-            if let item,
-               let image = UIImage(contentsOfFile: appState.historyStore.imageURL(for: item).path) {
+            if let currentItem, let image = loadedImage {
                 ScrollView {
                     VStack(spacing: 16) {
+                        Text(currentItem.title ?? "Capture")
+                            .font(.headline)
+
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
+                            .scaleEffect(0.9)
                             .frame(maxWidth: .infinity)
                             .background(Color.black.opacity(0.9))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, 10)
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Notes")
@@ -128,20 +167,20 @@ struct HistoryDetailView: View {
 
                             TextEditor(text: $draftNotes)
                                 .frame(minHeight: 120)
-                                .padding(6)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .scrollContentBackground(.hidden)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color(.systemGray6))
+                                        .fill(Color.white)
+                                        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
                                 )
                                 .onChange(of: draftNotes) { _, updatedValue in
-                                    appState.historyStore.updateNotes(for: item.id, notes: updatedValue)
+                                    appState.historyStore.updateNotes(for: currentItem.id, notes: updatedValue)
                                 }
                         }
                         .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color(.secondarySystemBackground))
-                        )
+                        .padding(.horizontal, 4)
                     }
                     .padding()
                 }
@@ -150,27 +189,56 @@ struct HistoryDetailView: View {
             }
         }
         .onAppear {
-            draftNotes = item?.notes ?? ""
+            draftNotes = currentItem?.notes ?? ""
         }
-        .onChange(of: item?.notes ?? "") { _, currentNotes in
+        .onChange(of: currentItem?.notes ?? "") { _, currentNotes in
             if currentNotes != draftNotes {
                 draftNotes = currentNotes
             }
         }
-        .navigationTitle(item?.title ?? "Capture")
-        .navigationBarTitleDisplayMode(.inline)
+//        .navigationTitle(currentItem?.title ?? "Capture")
+//        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let item {
-                ToolbarItem(placement: .topBarTrailing) {
+            if let currentItem {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
-                        appState.historyStore.toggleFavorite(for: item)
+                        showShare = true
                     } label: {
-                        Image(systemName: item.isFavorite ? "star.fill" : "star")
-                            .foregroundStyle(item.isFavorite ? .yellow : .primary)
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        appState.historyStore.toggleFavorite(for: currentItem)
+                    } label: {
+                        Image(systemName: currentItem.isFavorite ? "star.fill" : "star")
+                            .foregroundStyle(currentItem.isFavorite ? .yellow : .primary)
                     }
                     .buttonStyle(.plain)
                 }
+
             }
+        }
+        .confirmationDialog("Delete Capture", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete Capture", role: .destructive) {
+                if let currentItem {
+                    appState.historyStore.delete(currentItem)
+                }
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove the capture and image file.")
+        }
+        .sheet(isPresented: $showShare) {
+            ShareSheet(activityItems: shareActivityItems)
         }
     }
 }
