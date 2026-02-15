@@ -11,19 +11,16 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
+    @StateObject private var endpoint = EndpointViewModel()
     @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
     
     @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
-    @State private var captureTrigger = 0
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            CameraView(
-                captureTrigger: captureTrigger,
-                onCapture: handleCapturedImage
-            )
+            CameraView(endpoint: endpoint)
             VStack(spacing: 12) {
                 Spacer()
                 
@@ -96,7 +93,7 @@ struct ContentView: View {
                 
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        captureTrigger += 1
+                        endpoint.captureImage(mode: .manualCapture)
                     } label: {
                         Image(systemName: "camera.fill")
                     }
@@ -135,6 +132,9 @@ struct ContentView: View {
         
         .onReceive(receiveMessage) { message in
             chat.receivedMessage(message)
+        }
+        .onAppear {
+            endpoint.onCapture = handleCapturedImage
         }
     }
     
