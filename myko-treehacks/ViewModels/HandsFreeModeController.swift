@@ -96,8 +96,12 @@ final class HandsFreeModeController: ObservableObject {
     }
 
     private func armWakeListening() async {
-        guard isEnabled, !service.isRecording, !isCapturingCommand else { return }
+        guard isEnabled, !isCapturingCommand else { return }
 
+        if service.isRecording {
+            await service.stopRecording()
+        }
+        
         do {
             statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
             try await service.startRecording { [weak self] transcript in
@@ -204,9 +208,8 @@ final class HandsFreeModeController: ObservableObject {
         if !command.isEmpty {
             statusText = "Executing: \"\(command)\""
             executeCommand?(command)
-        } else {
-            onCommandUpdate?("")
         }
+        onCommandUpdate?("")
 
         await armWakeListening()
     }

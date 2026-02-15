@@ -31,8 +31,20 @@ final class ChatViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         
-        liveDictationMessageID = nil
-        messages.append(ChatMessage(role: .user, text: trimmed))
+        if let liveDictationMessageID,
+           let index = messages.firstIndex(where: { $0.id == liveDictationMessageID }) {
+            let previous = messages[index]
+            messages[index] = ChatMessage(
+                id: previous.id,
+                role: previous.role,
+                text: trimmed,
+                timestamp: previous.timestamp
+            )
+        } else {
+            messages.append(ChatMessage(role: .user, text: trimmed))
+        }
+
+        self.liveDictationMessageID = nil
         isSending = true
         sendMessage.send(trimmed)
     }
