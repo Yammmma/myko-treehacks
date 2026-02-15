@@ -129,6 +129,7 @@ private struct FavoritesCarouselView: View {
                         }
                     }
                     .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
                 }
             }
         }
@@ -155,6 +156,8 @@ private struct FavoriteHistoryCard: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     } else {
                         LinearGradient(
                             colors: [MykoColors.leafLight, MykoColors.leafBase.opacity(0.7)],
@@ -164,8 +167,6 @@ private struct FavoriteHistoryCard: View {
                     }
                 }
                 .frame(height: 140)
-                .frame(maxWidth: .infinity)
-                .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -184,7 +185,7 @@ private struct FavoriteHistoryCard: View {
                 .padding(.bottom, 12)
             }
             .frame(width: cardWidth, alignment: .leading)
-            .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Color(.white), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(Color.black.opacity(0.06), lineWidth: 1)
