@@ -23,7 +23,12 @@ final class HandsFreeModeController: ObservableObject {
         "hey myco",
         "hey miko",
         "hey mike o",
-        "hey michael"
+        "hey michael",
+        "hey meeko",
+        "hey meek o",
+        "hey meek oh",
+        "hey mi go",
+        "hey migo"
     ]
     
     private let silenceTimeout: TimeInterval = 1.4
@@ -37,6 +42,7 @@ final class HandsFreeModeController: ObservableObject {
     private var commandBuffer = ""
     private var onCommandUpdate: ((String) -> Void)?
     private var executeCommand: ((String) -> Void)?
+    private var wakeTransitionInProgress = false
 
     func updateMode(
         enabled: Bool,
@@ -77,6 +83,7 @@ final class HandsFreeModeController: ObservableObject {
         silenceTask?.cancel()
         silenceTask = nil
         commandBuffer = ""
+        wakeTransitionInProgress = false
         onCommandUpdate?("")
 
         if service.isRecording {
@@ -106,17 +113,20 @@ final class HandsFreeModeController: ObservableObject {
     }
 
     private func processWakeTranscript(_ transcript: String) {
+        guard isArmed, !wakeTransitionInProgress else { return }
         let normalized = normalizeForWakeDetection(transcript)
         guard wakePhraseAliases.contains(where: normalized.contains) else { return }
-
+        wakeTransitionInProgress = true
+        isArmed = false
+        
         let suffix = extractCommandSuffix(from: transcript)
         print("[HandsFree] Wake phrase heard: \(wakePhraseDisplay). Transcript: \(transcript)")
 
         Task {
             await service.stopRecording()
-            isArmed = false
             playWakeChime()
             await startCommandCapture(initialText: suffix)
+            wakeTransitionInProgress = false
         }
     }
 

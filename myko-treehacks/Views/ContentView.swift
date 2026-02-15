@@ -98,10 +98,10 @@ struct ContentView: View {
             if chat.isChatExpanded {
                 ChatComposerBar(
                     chat: chat,
-                    isRecording: transcriptionService.isRecording,
-                    onToggleRecording: {
-                        Task { await toggleRecording() }
-                    },
+//                    isRecording: transcriptionService.isRecording,
+//                    onToggleRecording: {
+//                        Task { await toggleRecording() }
+//                    },
                     onClose: {
                         withAnimation(.spring()) {
                             chat.isChatExpanded = false
@@ -201,20 +201,20 @@ struct ContentView: View {
             handsFreeEnabled = false
             await handsFreeController.stopAllListening()
         }
-        if transcriptionService.isRecording {
-            await transcriptionService.stopRecording()
-            return
-        }
+//        if transcriptionService.isRecording {
+//            await transcriptionService.stopRecording()
+//            return
+//        }
         
-        do {
-            try await transcriptionService.startRecording { transcript in
-                Task { @MainActor in
-                    chat.draft = transcript
-                }
-            }
-        } catch {
-            transcriptionError = error.localizedDescription
-        }
+//        do {
+//            try await transcriptionService.startRecording { transcript in
+//                Task { @MainActor in
+//                    chat.draft = transcript
+//                }
+//            }
+//        } catch {
+//            transcriptionError = error.localizedDescription
+//        }
     }
     
     @MainActor
@@ -239,8 +239,8 @@ struct ContentView: View {
 
 private struct ChatComposerBar: View {
     @ObservedObject var chat: ChatViewModel
-    let isRecording: Bool
-    let onToggleRecording: () -> Void
+//    let isRecording: Bool
+//    let onToggleRecording: () -> Void
     let onClose: () -> Void
     
     @FocusState private var isFocused: Bool
@@ -270,13 +270,13 @@ private struct ChatComposerBar: View {
                     chat.send()
                 }
             
-            Button(action: onToggleRecording) {
-                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .buttonStyle(.bordered)
-            .tint(isRecording ? .red : MykoColors.leafBase)
-            .accessibilityLabel("Dictate message")
+//            Button(action: onToggleRecording) {
+//                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+//                    .font(.system(size: 15, weight: .semibold))
+//            }
+//            .buttonStyle(.bordered)
+//            .tint(isRecording ? .red : MykoColors.leafBase)
+//            .accessibilityLabel("Dictate message")
             
             Button {
                 chat.send()
