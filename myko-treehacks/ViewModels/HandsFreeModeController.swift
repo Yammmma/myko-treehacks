@@ -17,8 +17,20 @@ final class HandsFreeModeController: ObservableObject {
     @Published private(set) var isCapturingCommand = false
     @Published private(set) var statusText = "Hands-Free Off"
 
-    private let wakePhrase = "hey myko"
+    private let wakePhraseDisplay = "Hey Myko"
+    private let wakePhraseAliases = [
+        "hey myko",
+        "hey myco",
+        "hey miko",
+        "hey mike o",
+        "hey michael"
+    ]
+    
     private let silenceTimeout: TimeInterval = 1.4
+    private lazy var wakePhraseRegex: NSRegularExpression? = {
+        let pattern = #"\bhey[\s,!.?\-]*((myk[o0])|(myco)|(miko)|(mike\s*o)|(michael))\b"#
+        return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }()
 
     private var service = SpeechAnalyzerTranscriptionService()
     private var silenceTask: Task<Void, Never>?
@@ -80,7 +92,7 @@ final class HandsFreeModeController: ObservableObject {
         guard isEnabled, !service.isRecording, !isCapturingCommand else { return }
 
         do {
-            statusText = "🎙️ Listening for \"Hey Myko\""
+            statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
             try await service.startRecording { [weak self] transcript in
                 guard let self else { return }
                 self.processWakeTranscript(transcript)
@@ -94,11 +106,11 @@ final class HandsFreeModeController: ObservableObject {
     }
 
     private func processWakeTranscript(_ transcript: String) {
-        let normalized = transcript.lowercased()
-        guard let range = normalized.range(of: wakePhrase) else { return }
+        let normalized = normalizeForWakeDetection(transcript)
+        guard wakePhraseAliases.contains(where: normalized.contains) else { return }
 
-        let suffix = String(transcript[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        print("[HandsFree] Wake phrase heard: \(wakePhrase). Transcript: \(transcript)")
+        let suffix = extractCommandSuffix(from: transcript)
+        print("[HandsFree] Wake phrase heard: \(wakePhraseDisplay). Transcript: \(transcript)")
 
         Task {
             await service.stopRecording()
@@ -108,6 +120,30 @@ final class HandsFreeModeController: ObservableObject {
         }
     }
 
+    private func normalizeForWakeDetection(_ text: String) -> String {
+        let lowered = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let words = lowered
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        return words.joined(separator: " ")
+    }
+
+    private func extractCommandSuffix(from transcript: String) -> String {
+        guard let wakePhraseRegex else {
+            return ""
+        }
+
+        let fullRange = NSRange(transcript.startIndex..<transcript.endIndex, in: transcript)
+        guard let match = wakePhraseRegex.firstMatch(in: transcript, options: [], range: fullRange),
+              let upperBound = Range(match.range, in: transcript)?.upperBound else {
+            return ""
+        }
+
+        return String(transcript[upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
     private func startCommandCapture(initialText: String) async {
         guard isEnabled else { return }
 
