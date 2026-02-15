@@ -1,7 +1,11 @@
 # Xcode
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
+<<<<<<< Updated upstream
 backend/checkpoints/
+=======
+backend/venv
+>>>>>>> Stashed changes
 
 ## User settings
 xcuserdata/

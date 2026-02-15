@@ -4,8 +4,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from agent import Agent
-from tracker import Tracker
+from tracker import Segmenter
 import json
+import base64
+import asyncio
 
 app = FastAPI()
 
@@ -18,8 +20,9 @@ app.add_middleware(
 )
 
 # Init Global Instances
-tracker = Tracker()
-agent = Agent(tracker, debug=True)
+segmenter = Segmenter()
+agent = Agent(segmenter, debug=True)
+print("🚀 Server ready on :8000  (set OPENAI_API_KEY before sending /query requests)")
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -27,37 +30,71 @@ class ChatRequest(BaseModel):
 
 @app.post("/query")
 async def query_endpoint(request: ChatRequest):
-    # Pass prompt to agent. Agent will use tracker.latest_frame if request.frame is None
     response = await agent.query(request.prompt, request.frame)
     return {"response": response}
+ 
+def _extract_frame(message: dict) -> str | None:
+    """Pull the base64 frame string out of a raw WS message."""
+    if "text" in message:
+        try:
+            data = json.loads(message["text"])
+            return data.get("frame")
+        except Exception:
+            return message["text"]
+    elif "bytes" in message:
+        try:
+            data = json.loads(message["bytes"])
+            return data.get("frame")
+        except Exception:
+            return message["bytes"].decode("utf-8")
+    return None
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("✅ WS Connected")
 
-    try:
-        while True:
-            # 1. Receive Frame
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
-                raise WebSocketDisconnect()
+    # Shared slot — receiver always writes latest, processor reads it
+    latest_frame: dict = {"data": None, "event": asyncio.Event()}
 
-            base64_frame = None
-            if "text" in message:
+    async def receiver():
+        """Tight loop: drain the socket, keep only the newest frame."""
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    raise WebSocketDisconnect()
+                frame = _extract_frame(message)
+                if frame:
+                    latest_frame["data"] = frame
+                    latest_frame["event"].set()
+        except (WebSocketDisconnect, Exception):
+            latest_frame["event"].set()  # unblock processor so it can exit
+            raise
+
+    async def processor():
+        """Wait for a new frame, render with static masks if any."""
+        try:
+            while True:
+                await latest_frame["event"].wait()
+                latest_frame["event"].clear()
+
+                frame = latest_frame["data"]
+                if frame is None:
+                    continue
+
+                # Render static overlay if masks are active. Fail open per frame.
                 try:
-                    data = json.loads(message["text"])
-                    base64_frame = data.get("frame")
-                except:
-                    base64_frame = message["text"] # Handle raw string case
-
-            if base64_frame:
-                # 2. Process (Decode -> Store -> Overlay -> Encode)
-                edited_frame = tracker.process_frame(base64_frame)
-                
-                # 3. Send Back
+                    edited_frame = await asyncio.to_thread(segmenter.render_frame, frame)
+                except Exception as render_err:
+                    print(f"⚠️ Frame render error: {render_err}")
+                    edited_frame = frame.split(',', 1)[-1] if ',' in frame else frame
                 await websocket.send_text(edited_frame)
+        except Exception:
+            raise
 
+    try:
+        await asyncio.gather(receiver(), processor())
     except WebSocketDisconnect:
         print("❌ WS Disconnected")
     except Exception as e:
@@ -107,4 +144,8 @@ async def video_endpoint(websocket: WebSocket):
         logger.error(f"❌ Fatal WebSocket Error: {e}", exc_info=True)
 
 if __name__ == "__main__":
+<<<<<<< Updated upstream
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+=======
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True, timeout_keep_alive=300000)
+>>>>>>> Stashed changes
