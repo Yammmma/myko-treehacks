@@ -18,6 +18,12 @@ private struct NotesInferenceResponse: Codable {
     let response: String
 }
 
+private let screenshotNotesPrompt = """
+You are generating notes for a saved microscope screenshot in the Myko camera view.
+Write 1–2 concise, confident sentences describing the tissue and cell morphology that are visible.
+Use technical pathology language, avoid hedging, and do not ask for additional input.
+"""
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
@@ -124,10 +130,11 @@ struct ContentView: View {
             if !chat.isChatExpanded {
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        // TODO: hook up editing box toggle later
+                        endpoint.toggleBoundingBoxLock()
                     } label: {
-                        Image(systemName: "crop") // later: swap based on editing state
+                        Image(systemName: "crop")
                     }
+                    .accessibilityLabel(endpoint.isBoundingBoxLocked ? "Unlock bounding box" : "Lock bounding box")
                 }
                 
                 ToolbarItem(placement: .bottomBar) {
@@ -221,7 +228,7 @@ struct ContentView: View {
         guard let frameB64 = image.base64EncodedString() else { return nil }
 
         let requestPayload = NotesInferenceRequest(
-            prompt: "Write 1–2 concise sentences describing what is visible in this microscope image. If uncertain, say 'Uncertain' and suggest what to adjust.",
+            prompt: screenshotNotesPrompt,
             frame: frameB64
         )
 
