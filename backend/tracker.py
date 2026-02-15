@@ -52,7 +52,7 @@ class Segmenter:
         self._cellpose_model = None
         self._sam2_mask_generator = None
         self._frame_counter = 0
-        self._recalc_interval = 60
+        self._recalc_interval = 15
         
         # Color palette for overlays
         self.colors = [
@@ -952,7 +952,8 @@ class Segmenter:
                 print(f"⚠️ render_frame: frame={w}x{h} vs segmentation={orig[1]}x{orig[0]} — scaling")
             self._ensure_scaled(md, h, w)
         
-        # Draw all active masks with strong fill + clear boundaries
+        # Draw all active masks — tint only masked pixels, leave background untouched
+        combined_raster = np.zeros((h, w), dtype=np.uint8)
         fill_layer = np.zeros_like(img, dtype=np.uint8)
         
         for mask in self.active_masks:
@@ -961,8 +962,13 @@ class Segmenter:
             if raster is None:
                 continue
             fill_layer[raster > 0] = color
+            combined_raster[raster > 0] = 255
 
-        cv2.addWeighted(fill_layer, 0.55, img, 0.45, 0, dst=img)
+        # Blend only where masks exist: 75% original + 25% color tint
+        mask_region = combined_raster > 0
+        img[mask_region] = cv2.addWeighted(
+            img, 0.75, fill_layer, 0.25, 0
+        )[mask_region]
 
         for mask in self.active_masks:
             contours = [self._sanitize_contour(c) for c in mask.get("contours", [])]
