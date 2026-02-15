@@ -118,10 +118,11 @@ struct HistoryDetailView: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
+                            .scaleEffect(0.9)
                             .frame(maxWidth: .infinity)
                             .background(Color.black.opacity(0.9))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .padding(.horizontal, 4)
+                            .padding(.horizontal, 10)
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Notes")
