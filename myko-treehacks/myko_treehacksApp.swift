@@ -39,15 +39,14 @@ struct RootView: View {
     
     var body: some View {
         TabView(selection: $appState.selectedTab) {
-            HomeView()
-                .tabItem { Image(systemName: "house") }
-                .tag(AppState.Tab.home)
-
             HistoryView()
-                .tabItem { Image(systemName: "clock") }
+                .tabItem { Label("History", systemImage: "clock") }
                 .tag(AppState.Tab.history)
+            
+            HomeView()
+                .tabItem { Label("Home", systemImage: "house") }
+                .tag(AppState.Tab.home)
         }
-        .tint(MykoColors.terraBase)
         .fullScreenCover(isPresented: $isOnboardingPresented) {
             OnboardingView(isPresented: $isOnboardingPresented)
         }

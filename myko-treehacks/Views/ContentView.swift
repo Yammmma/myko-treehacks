@@ -159,8 +159,8 @@ struct ContentView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
-//        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
+        .toolbarBackground(.visible, for: .bottomBar)
+        //        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
 //            Button("OK") { transcriptionError = nil }
 //        }, message: {
 //            Text(transcriptionError ?? "Unknown error")
@@ -234,6 +234,15 @@ struct ContentView: View {
         }
         
         chat.send(command)
+    }
+}
+
+struct CameraScreenView: View {
+    var body: some View {
+        ContentView()
+            .navigationTitle("Camera")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
     }
 }
 

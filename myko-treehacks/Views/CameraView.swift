@@ -146,6 +146,17 @@ private struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.updateZoom(to: currentZoom + totalZoom)
         
+        if context.coordinator.lastCaptureTrigger != captureTrigger {
+            context.coordinator.lastCaptureTrigger = captureTrigger
+            context.coordinator.requestSnapshot { image in
+                guard let img = image else { return }
+                DispatchQueue.main.async {
+                    self.capturedImage = img
+                    self.onCapture?(img)
+                }
+            }
+        }
+        
         // Handle manual capture trigger (HTTP Query)
         if !pendingPrompt.isEmpty {
             // Capture the prompt value NOW before the async snapshot clears it
@@ -197,6 +208,7 @@ private struct CameraPreview: UIViewRepresentable {
         private var webSocketTask: URLSessionWebSocketTask?
         var onFrameReceived: ((UIImage) -> Void)?
         var streamingTimer: Timer?
+        var lastCaptureTrigger: Int = 0
         
         struct InferenceWSSchema: Codable {
             let frame: String
