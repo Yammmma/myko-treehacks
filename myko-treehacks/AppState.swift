@@ -14,8 +14,15 @@ final class AppState: ObservableObject {
         case home
         case history
     }
+    
+    enum HistorySortMode: Hashable {
+        case newest
+        case favorites
+    }
 
     @Published var selectedTab: Tab = .home
+    @Published var historySortMode: HistorySortMode = .newest
+
     let historyStore = HistoryStore()
     private var cancellables = Set<AnyCancellable>()
 

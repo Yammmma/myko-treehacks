@@ -141,7 +141,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
                let image = UIImage(data: imageData),
                let cgImage = image.cgImage,
                let masked = circularMaskedImage(from: cgImage) {
-                DispatchQueue.main.async { self.annotatedImage = UIImage(cgImage: masked) }
+                DispatchQueue.main.async { self.annotatedImage = UIImage(cgImage: masked, scale: 1, orientation: .right) }
             }
         default:
             break
@@ -237,6 +237,9 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             if session.canAddOutput(videoOutput) {
                 session.addOutput(videoOutput)
                 videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
+            }
+            if let connection = videoOutput.connection(with: .video), connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
             }
             
             self.session.commitConfiguration()
@@ -338,7 +341,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             requesters.forEach { $0(nil) }
             return
         }
-        let uiImage = UIImage(cgImage: masked)
+        let uiImage = UIImage(cgImage: masked, scale: 1, orientation: .right)
         
 //            let uiImage = UIImage(named: "cell4")
         

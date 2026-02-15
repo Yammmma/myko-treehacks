@@ -41,7 +41,7 @@ struct ContentView: View {
 //    @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
-    @State private var handsFreeEnabled = false
+//    @State private var handsFreeEnabled = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -81,18 +81,18 @@ struct ContentView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 6) {
-                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                            .onChange(of: handsFreeEnabled) { _, enabled in
-                                handsFreeController.updateMode(
-                                    enabled: enabled,
-                                    appIsForegrounded: scenePhase == .active,
-                                    onCommandUpdate: updateHandsFreeDraft,
-                                    onExecute: runHandsFreeCommand
-                                )
-                            }
-                        
+//                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
+//                            .toggleStyle(.switch)
+//                            .labelsHidden()
+//                            .onChange(of: handsFreeEnabled) { _, enabled in
+//                                handsFreeController.updateMode(
+//                                    enabled: enabled,
+//                                    appIsForegrounded: scenePhase == .active,
+//                                    onCommandUpdate: updateHandsFreeDraft,
+//                                    onExecute: runHandsFreeCommand
+//                                )
+//                            }
+//                        
                         Text(handsFreeController.statusText)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -195,6 +195,12 @@ struct ContentView: View {
         }
         .onAppear {
             endpoint.onCapture = handleCapturedImage
+            handsFreeController.updateMode(
+                enabled: true,
+                appIsForegrounded: scenePhase == .active,
+                onCommandUpdate: updateHandsFreeDraft,
+                onExecute: runHandsFreeCommand
+            )
         }
         .onChange(of: scenePhase) { _, phase in
             handsFreeController.updateForegroundState(isForegrounded: phase == .active)
