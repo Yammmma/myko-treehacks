@@ -3,7 +3,7 @@ import AVFoundation
 
 struct OnboardingView: View {
     @Binding var isPresented: Bool
-    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
+//    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
 
     @State private var currentPage = 0
     @State private var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -12,7 +12,7 @@ struct OnboardingView: View {
     var body: some View {
         TabView(selection: $currentPage) {
             OnboardingPage(
-                imageName: "aqi.medium",
+                imageName: "myko-micro",
                 title: "AI Microscopy in Your Pocket",
                 bodyText: "Capture and analyze microscopic samples instantly with on-device intelligence.",
                 buttonTitle: "Continue",
@@ -20,9 +20,10 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: advancePage
             )
+            .tag(0)
 
             OnboardingPage(
-                imageName: "camera.viewfinder",
+                imageName: "myko-position1",
                 title: "Camera Access Required",
                 bodyText: "Myko uses your camera to capture microscope images for analysis.",
                 buttonTitle: cameraButtonTitle,
@@ -30,10 +31,11 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: handleCameraAction
             )
+            .tag(1)
 
             OnboardingPage(
-                imageName: "waveform.and.mic",
-                title: "Voice Dictation (Optional)",
+                imageName: "myko-position2",
+                title: "Voice Dictation",
                 bodyText: "Use your voice to describe samples and add notes hands-free.",
                 buttonTitle: micButtonTitle,
                 pageIndex: 2,
@@ -42,9 +44,10 @@ struct OnboardingView: View {
                 secondaryActionTitle: "Skip for now",
                 secondaryAction: advancePage
             )
+            .tag(2)
 
             OnboardingPage(
-                imageName: "checkmark.seal",
+                imageName: "myko-position3",
                 title: "You’re Ready to Scan",
                 bodyText: "Place your sample under the microscope and tap Scan to begin.",
                 buttonTitle: "Start Using Myko",
@@ -52,8 +55,9 @@ struct OnboardingView: View {
                 currentPage: $currentPage,
                 primaryAction: completeOnboarding
             )
+            .tag(3)
         }
-        .tabViewStyle(.page(indexDisplayMode: .always))
+        .tabViewStyle(.page(indexDisplayMode: .never))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
         .background(Color(.systemBackground))
         .onAppear {
@@ -123,7 +127,7 @@ struct OnboardingView: View {
     }
 
     private func completeOnboarding() {
-        hasSeenOnboarding = true
+//        hasSeenOnboarding = true
         isPresented = false
     }
 }
@@ -145,11 +149,10 @@ private struct OnboardingPage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Image(systemName: imageName)
+            Image(imageName)
                 .resizable()
                 .scaledToFit()
                 .frame(maxHeight: 260)
-                .foregroundStyle(MykoColors.leafBase)
                 .opacity(animateImage ? 1 : 0)
                 .offset(y: animateImage ? 0 : 12)
                 .padding(.horizontal, 24)
@@ -185,7 +188,7 @@ private struct OnboardingPage: View {
                 Button(secondaryActionTitle, action: secondaryAction)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
             }
 
             Color.clear

@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		AABC5FFA2F403FF300974DB8 /* myko-treehacks.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "myko-treehacks.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AABC5FFA2F403FF300974DB8 /* Myko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Myko.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -53,7 +53,7 @@
 		AABC5FFB2F403FF300974DB8 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AABC5FFA2F403FF300974DB8 /* myko-treehacks.app */,
+				AABC5FFA2F403FF300974DB8 /* Myko.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -80,7 +80,7 @@
 			packageProductDependencies = (
 			);
 			productName = "myko-treehacks";
-			productReference = AABC5FFA2F403FF300974DB8 /* myko-treehacks.app */;
+			productReference = AABC5FFA2F403FF300974DB8 /* Myko.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -270,6 +270,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "myko-treehacks/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Myko;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Myko needs camera access for microscope feed.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Myko needs microphone access for voice dictation";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = Yessir;
@@ -285,7 +286,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.madebyyuma.myko-treehacks";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Myko;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -307,6 +308,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "myko-treehacks/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Myko;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Myko needs camera access for microscope feed.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Myko needs microphone access for voice dictation";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = Yessir;
@@ -322,7 +324,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.madebyyuma.myko-treehacks";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Myko;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

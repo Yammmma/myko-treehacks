@@ -17,6 +17,7 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
         case permissionDenied
         case setupFailed
         case invalidAudioDataType
+        case alreadyRecording
 
         var errorDescription: String? {
             switch self {
@@ -28,12 +29,18 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
                 return "Failed to set up speech transcription."
             case .invalidAudioDataType:
                 return "Invalid audio format for SpeechAnalyzer."
+            case .alreadyRecording:
+                return "Speech transcription is already running."
             }
+            
         }
     }
 
     @Published private(set) var isRecording = false
-
+    
+    private var isStartingRecording = false
+    private var isTapInstalled = false
+    
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     private var analyzerFormat: AVAudioFormat?
@@ -47,28 +54,33 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
     private var volatileTranscript = ""
 
     func startRecording(locale: Locale = .current, onTranscriptUpdate: @escaping (String) -> Void) async throws {
-        guard !isRecording else { return }
-        guard await isAuthorized() else { throw TranscriptionError.permissionDenied }
+        guard !isRecording, !isStartingRecording else {
+            throw TranscriptionError.alreadyRecording
+        }
+        isStartingRecording = true
 
-        try setUpAudioSession()
-        try await setUpTranscriber(locale: locale)
-        startRecognitionTask(onTranscriptUpdate: onTranscriptUpdate)
-        try startAudioEngineTap()
+        do {
+            guard await isAuthorized() else { throw TranscriptionError.permissionDenied }
 
-        isRecording = true
+            try setUpAudioSession()
+            try await setUpTranscriber(locale: locale)
+            startRecognitionTask(onTranscriptUpdate: onTranscriptUpdate)
+            try startAudioEngineTap()
+
+            isRecording = true
+            isStartingRecording = false
+        } catch {
+            await resetRecordingPipeline()
+            isStartingRecording = false
+            throw error
+        }
     }
 
     func stopRecording() async {
-        guard isRecording else { return }
-
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        inputBuilder?.finish()
-
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-        recognizerTask?.cancel()
-
+        guard isRecording || isStartingRecording || isTapInstalled else { return }
+        await resetRecordingPipeline()
         isRecording = false
+        isStartingRecording = false
     }
 
     private func setUpTranscriber(locale: Locale) async throws {
@@ -97,10 +109,13 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
     }
 
     private func startRecognitionTask(onTranscriptUpdate: @escaping (String) -> Void) {
+        recognizerTask?.cancel()
+
+        guard let transcriber else { return }
+        let results = transcriber.results
         recognizerTask = Task {
-            guard let transcriber else { return }
             do {
-                for try await result in transcriber.results {
+                for try await result in results {
                     let text = String(result.text.characters)
                     if result.isFinal {
                         finalizedTranscript += text
@@ -119,6 +134,11 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
     private func startAudioEngineTap() throws {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
+        
+        if isTapInstalled {
+            inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self else { return }
@@ -126,11 +146,38 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
                 try? await self.streamAudioToTranscriber(buffer)
             }
         }
-
+        isTapInstalled = true
         audioEngine.prepare()
         try audioEngine.start()
     }
 
+    private func resetRecordingPipeline() async {
+        recognizerTask?.cancel()
+        await recognizerTask?.value
+        recognizerTask = nil
+
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+
+        if isTapInstalled {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
+
+        inputBuilder?.finish()
+        inputBuilder = nil
+        inputSequence = nil
+
+        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        analyzer = nil
+        transcriber = nil
+        analyzerFormat = nil
+
+        finalizedTranscript = ""
+        volatileTranscript = ""
+    }
+    
     private func streamAudioToTranscriber(_ buffer: AVAudioPCMBuffer) async throws {
         guard let inputBuilder, let analyzerFormat else {
             throw TranscriptionError.invalidAudioDataType

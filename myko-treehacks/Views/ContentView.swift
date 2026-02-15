@@ -7,16 +7,29 @@
 
 import SwiftUI
 import UIKit
+import Combine
+
+private struct NotesInferenceRequest: Codable {
+    let prompt: String
+    let frame: String
+}
+
+private struct NotesInferenceResponse: Codable {
+    let response: String
+}
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
     @StateObject private var endpoint = EndpointViewModel()
-    @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
+//    @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
+    @StateObject private var handsFreeController = HandsFreeModeController()
     
-    @State private var transcriptionError: String?
+//    @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
+    @State private var handsFreeEnabled = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -51,16 +64,50 @@ struct ContentView: View {
                     .padding(.bottom, chat.isChatExpanded ? 88 : 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            VStack {
+                HStack {
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .onChange(of: handsFreeEnabled) { _, enabled in
+                                handsFreeController.updateMode(
+                                    enabled: enabled,
+                                    appIsForegrounded: scenePhase == .active,
+                                    onCommandUpdate: updateHandsFreeDraft,
+                                    onExecute: runHandsFreeCommand
+                                )
+                            }
+                        
+                        Text(handsFreeController.statusText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                
+                Spacer()
+            }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chat.isChatExpanded)
         .safeAreaInset(edge: .bottom) {
             if chat.isChatExpanded {
                 ChatComposerBar(
                     chat: chat,
-                    isRecording: transcriptionService.isRecording,
-                    onToggleRecording: {
-                        Task { await toggleRecording() }
-                    },
+//                    isRecording: transcriptionService.isRecording,
+//                    onToggleRecording: {
+//                        Task { await toggleRecording() }
+//                    },
                     onClose: {
                         withAnimation(.spring()) {
                             chat.isChatExpanded = false
@@ -118,12 +165,12 @@ struct ContentView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
-        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
-            Button("OK") { transcriptionError = nil }
-        }, message: {
-            Text(transcriptionError ?? "Unknown error")
-        })
+        .toolbarBackground(.visible, for: .bottomBar)
+        //        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
+//            Button("OK") { transcriptionError = nil }
+//        }, message: {
+//            Text(transcriptionError ?? "Unknown error")
+//        })
         .alert("Save Failed", isPresented: .constant(captureError != nil), actions: {
             Button("OK") { captureError = nil }
         }, message: {
@@ -136,14 +183,26 @@ struct ContentView: View {
         .onAppear {
             endpoint.onCapture = handleCapturedImage
         }
+        .onChange(of: scenePhase) { _, phase in
+            handsFreeController.updateForegroundState(isForegrounded: phase == .active)
+        }
+        
     }
-    
     @MainActor
     private func handleCapturedImage(_ image: UIImage) {
         do {
-            try appState.historyStore.save(image: image)
+            let savedItem = try appState.historyStore.save(image: image)
             showSavedToast = true
             captureError = nil
+
+            Task {
+                let generatedNotes = await generateNotes(for: image)
+                guard let generatedNotes else { return }
+
+                await MainActor.run {
+                    appState.historyStore.updateNotes(for: savedItem.id, notes: generatedNotes)
+                }
+            }
             
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))
@@ -157,29 +216,86 @@ struct ContentView: View {
         }
     }
     
+    private func generateNotes(for image: UIImage) async -> String? {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return nil }
+        guard let frameB64 = image.base64EncodedString() else { return nil }
+
+        let requestPayload = NotesInferenceRequest(
+            prompt: "Write 1–2 concise sentences describing what is visible in this microscope image. If uncertain, say 'Uncertain' and suggest what to adjust.",
+            frame: frameB64
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestPayload)
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoded = try JSONDecoder().decode(NotesInferenceResponse.self, from: data)
+            let trimmed = decoded.response.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return String(trimmed.prefix(200))
+        } catch {
+            return nil
+        }
+    }
+    
+//    @MainActor
+//    private func toggleRecording() async {
+//        if handsFreeEnabled {
+//            handsFreeEnabled = false
+//            await handsFreeController.stopAllListening()
+//        }
+//        if transcriptionService.isRecording {
+//            await transcriptionService.stopRecording()
+//            return
+//        }
+        
+//        do {
+//            try await transcriptionService.startRecording { transcript in
+//                Task { @MainActor in
+//                    chat.draft = transcript
+//                }
+//            }
+//        } catch {
+//            transcriptionError = error.localizedDescription
+//        }
+//    }
+    
     @MainActor
-    private func toggleRecording() async {
-        if transcriptionService.isRecording {
-            await transcriptionService.stopRecording()
-            return
+    private func updateHandsFreeDraft(_ transcript: String) {
+        withAnimation(.spring()) {
+            chat.isChatExpanded = true
         }
         
-        do {
-            try await transcriptionService.startRecording { transcript in
-                Task { @MainActor in
-                    chat.draft = transcript
-                }
-            }
-        } catch {
-            transcriptionError = error.localizedDescription
+        chat.updateLiveDictation(transcript)
+    }
+    
+    
+    @MainActor
+    private func runHandsFreeCommand(_ command: String) {
+        withAnimation(.spring()) {
+            chat.isChatExpanded = true
         }
+        
+        chat.send(command)
+    }
+}
+
+struct CameraScreenView: View {
+    var body: some View {
+        ContentView()
+            .navigationTitle("Camera")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
     }
 }
 
 private struct ChatComposerBar: View {
     @ObservedObject var chat: ChatViewModel
-    let isRecording: Bool
-    let onToggleRecording: () -> Void
+//    let isRecording: Bool
+//    let onToggleRecording: () -> Void
     let onClose: () -> Void
     
     @FocusState private var isFocused: Bool
@@ -209,13 +325,13 @@ private struct ChatComposerBar: View {
                     chat.send()
                 }
             
-            Button(action: onToggleRecording) {
-                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .buttonStyle(.bordered)
-            .tint(isRecording ? .red : MykoColors.leafBase)
-            .accessibilityLabel("Dictate message")
+//            Button(action: onToggleRecording) {
+//                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+//                    .font(.system(size: 15, weight: .semibold))
+//            }
+//            .buttonStyle(.bordered)
+//            .tint(isRecording ? .red : MykoColors.leafBase)
+//            .accessibilityLabel("Dictate message")
             
             Button {
                 chat.send()
