@@ -30,6 +30,7 @@ struct CameraView: View {
                         Image(uiImage: endpoint.annotatedImage ?? capturedImage)
                             .resizable()
                             .scaledToFit()
+                            .rotationEffect(.degrees(-90))
                     } else {
                         ProgressView()
                             .progressViewStyle(.circular)
