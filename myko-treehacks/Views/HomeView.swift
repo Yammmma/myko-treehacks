@@ -27,65 +27,85 @@ struct HomeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
                         heroSection
+
                         NavigationLink {
                             CameraView()
                         } label: {
-                            Text("Start Scan")
-                                .font(.title2.weight(.bold))
+                            Text("Scan Slide")
+                                .font(.title3.weight(.semibold))
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 64)
+                                .frame(height: 56) // ⭐ better standard height
                                 .background(MykoColors.leafBase)
                                 .foregroundStyle(.white)
-                                .clipShape(Capsule())
+                                .clipShape(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                )
+                                .shadow(
+                                    color: MykoColors.leafBase.opacity(0.28),
+                                    radius: 10,
+                                    x: 0,
+                                    y: 6
+                                )
+                                .padding(.horizontal, 10)
                         }
                         .buttonStyle(.plain)
-                        
+
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("Favorites")
-                                .font(.title2.weight(.semibold))
+                            HStack {
+                                Text("Favorites")
+                                    .font(.title3.weight(.semibold))
+
+                                Spacer()
+
+                                NavigationLink("See all") {
+                                    HistoryView()
+                                }
+                                .font(.subheadline)
+                                .foregroundStyle(MykoColors.leafBase)
+                            }
 
                             favoritesCarousel
                         }
 
-                        NavigationLink("Go to Content") {
-                            ContentView()
-                        }
-                        .buttonStyle(.borderedProminent)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
                     .padding(.bottom, 24)
                 }
-                .background(Color(.systemGroupedBackground))
+                .background(Color.white)
                 .navigationTitle("Home")
             }
         }
-    private var heroSection: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [ Color.white, MykoColors.leafLight.opacity(0.8)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+
+        private var heroSection: some View {
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(.systemGray6)) // or your brand color
+
+                Image("myko-logo-1")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxHeight: 260)
+                
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 300)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .strokeBorder(MykoColors.leafBase.opacity(0.15), lineWidth: 1)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
                 )
+                .shadow(color: .black.opacity(0.08), radius: 20, y: 10)
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
-            Image("myko-logo-transparent")
-                .resizable()
-                .scaledToFit()
-                .frame(maxHeight: 260)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 320)
-        .shadow(color: .black.opacity(0.07), radius: 14, x: 0, y: 8)
-    }
 
     private var favoritesCarousel: some View {
         Group {
@@ -137,28 +157,29 @@ private struct FavoriteCardView: View {
             .frame(maxWidth: .infinity)
             .clipped()
 
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.58)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
             VStack(alignment: .leading, spacing: 4) {
+
                 Text(item.title)
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
 
                 Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
             }
-            .padding(16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(12)
         }
         .frame(width: 280, height: 220)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 6)
     }
 }
 
