@@ -24,6 +24,12 @@ Write 1–2 concise, confident sentences describing the tissue and cell morpholo
 Use technical pathology language, avoid hedging, and do not ask for additional input.
 """
 
+private let screenshotTitlePrompt = """
+You are generating a very short title for a saved microscope screenshot in the Myko camera view.
+Return only a 1-3 word title that captures the key visible finding.
+Use concise technical wording and no punctuation.
+"""
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
@@ -211,6 +217,15 @@ struct ContentView: View {
                 }
             }
             
+            Task {
+                let generatedTitle = await generateTitle(for: image)
+                guard let generatedTitle else { return }
+
+                await MainActor.run {
+                    appState.historyStore.updateTitle(for: savedItem.id, title: generatedTitle)
+                }
+            }
+            
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))
                 showSavedToast = false
@@ -247,6 +262,38 @@ struct ContentView: View {
             return nil
         }
     }
+    
+    private func generateTitle(for image: UIImage) async -> String? {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return nil }
+        guard let frameB64 = image.base64EncodedString() else { return nil }
+
+        let requestPayload = NotesInferenceRequest(
+            prompt: screenshotTitlePrompt,
+            frame: frameB64
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestPayload)
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoded = try JSONDecoder().decode(NotesInferenceResponse.self, from: data)
+            let trimmed = decoded.response
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: ".", with: "")
+            guard !trimmed.isEmpty else { return nil }
+
+            let words = trimmed.split(whereSeparator: \.isWhitespace)
+            guard !words.isEmpty else { return nil }
+            return words.prefix(3).joined(separator: " ")
+        } catch {
+            return nil
+        }
+    }
+    
     
 //    @MainActor
 //    private func toggleRecording() async {

@@ -99,9 +99,7 @@ final class HandsFreeModeController: ObservableObject {
         guard isEnabled, !isCapturingCommand else { return }
 
         if service.isRecording {
-            isArmed = true
-            statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
-            return
+            await service.stopRecording()
         }
         
         do {
