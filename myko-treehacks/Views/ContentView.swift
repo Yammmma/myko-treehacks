@@ -92,7 +92,7 @@ struct ContentView: View {
 //                                    onExecute: runHandsFreeCommand
 //                                )
 //                            }
-//                        
+//
                         Text(handsFreeController.statusText)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
