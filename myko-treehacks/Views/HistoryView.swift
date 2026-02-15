@@ -96,7 +96,7 @@ struct HistoryView: View {
 }
 
 
-private struct HistoryDetailView: View {
+struct HistoryDetailView: View {
     @EnvironmentObject private var appState: AppState
     private let itemID: HistoryItem.ID
 
