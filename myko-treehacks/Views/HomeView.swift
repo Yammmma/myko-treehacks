@@ -151,7 +151,8 @@ private struct FavoriteHistoryCard: View {
             HistoryDetailView(item: item)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                Group {
+
+                ZStack {
                     if let image = UIImage(contentsOfFile: appState.historyStore.imageURL(for: item).path) {
                         Image(uiImage: image)
                             .resizable()
@@ -167,7 +168,7 @@ private struct FavoriteHistoryCard: View {
                     }
                 }
                 .frame(height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
@@ -175,17 +176,20 @@ private struct FavoriteHistoryCard: View {
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(width: cardWidth, alignment: .leading)
-            .background(Color(.white), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(6)
+            .frame(width: cardWidth)
+            .background(
+                Color(.white),
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(Color.black.opacity(0.06), lineWidth: 1)

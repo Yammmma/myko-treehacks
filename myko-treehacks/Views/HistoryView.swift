@@ -121,6 +121,7 @@ struct HistoryDetailView: View {
                             .frame(maxWidth: .infinity)
                             .background(Color.black.opacity(0.9))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, 4)
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Notes")
@@ -128,20 +129,19 @@ struct HistoryDetailView: View {
 
                             TextEditor(text: $draftNotes)
                                 .frame(minHeight: 120)
-                                .padding(6)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .scrollContentBackground(.hidden)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color(.systemGray6))
-                                )
+                                        .fill(Color.white)
+                                        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)                                )
                                 .onChange(of: draftNotes) { _, updatedValue in
                                     appState.historyStore.updateNotes(for: item.id, notes: updatedValue)
                                 }
                         }
                         .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color(.secondarySystemBackground))
-                        )
+                        .padding(.horizontal, 4)
                     }
                     .padding()
                 }
