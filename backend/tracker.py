@@ -51,6 +51,8 @@ class Segmenter:
 
         self._cellpose_model = None
         self._sam2_mask_generator = None
+        self._frame_counter = 0
+        self._recalc_interval = 60
         
         # Color palette for overlays
         self.colors = [
@@ -877,6 +879,46 @@ class Segmenter:
         md["raster"] = self._contours_to_binary_mask(h, w, scaled)
         md["scaled_for"] = (h, w)
 
+    def _recalc_masks(self, img: np.ndarray) -> None:
+        """Re-run segmentation on the current frame to reposition active masks."""
+        if not self.active_masks:
+            return
+        h, w = img.shape[:2]
+        for md in self.active_masks:
+            query = md.get("query", "all cells")
+            backend = "opencv"  # fast path for real-time recalc
+            try:
+                contours, used = self._find_contours_dispatch(img, query, backend)
+            except Exception as e:
+                print(f"⚠️ recalc_masks error: {e}")
+                continue
+            if not contours:
+                continue
+            # Re-score and pick top matches
+            img_area = float(h * w)
+            scored = []
+            for c in contours:
+                c = self._sanitize_contour(c)
+                if c is None:
+                    continue
+                feat = self._contour_features(c)
+                score = self._query_score(query, feat, img_area=img_area)
+                scored.append((c, score))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            peak = scored[0][1] if scored else 0.0
+            conf_floor = peak * 0.72
+            selected = [c for c, s in scored if s >= conf_floor][:220]
+            if not selected:
+                continue
+            normalized = self._normalize_contours(selected, (h, w))
+            md["original_contours"] = selected
+            md["normalized_contours"] = normalized
+            md["original_dimensions"] = (h, w)
+            md["contours"] = None
+            md["raster"] = None
+            md["scaled_for"] = None
+        print(f"🔄 Recalculated masks at frame {self._frame_counter}")
+
     def render_frame(self, b64_frame: str) -> str:
         """Render the current frame with static mask overlays.
         
@@ -886,6 +928,7 @@ class Segmenter:
         # Strip data-URI prefix
         raw = b64_frame.split(',', 1)[-1] if ',' in b64_frame else b64_frame
         self._latest_b64 = raw
+        self._frame_counter += 1
         
         # Fast path: no overlays → passthrough (no decode/encode!)
         if not self.active_masks:
@@ -897,6 +940,10 @@ class Segmenter:
             return raw
 
         h, w = img.shape[:2]
+
+        # Recalculate masks every k frames to handle camera shifts
+        if self._frame_counter % self._recalc_interval == 0:
+            self._recalc_masks(img)
 
         # Ensure scaled contours + rasters match current frame dimensions.
         for md in self.active_masks:

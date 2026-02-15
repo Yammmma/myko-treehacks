@@ -35,6 +35,14 @@ async def query_endpoint(request: ChatRequest):
     return {"response": response}
 
 
+@app.post("/clear")
+async def clear_endpoint():
+    global segmenter, agent
+    segmenter = Segmenter()
+    agent = Agent(segmenter, debug=True)
+    return {"status": "ok"}
+
+
 def _extract_frame(message: dict) -> str | None:
     if "text" in message:
         try:
