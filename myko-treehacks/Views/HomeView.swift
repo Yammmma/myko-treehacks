@@ -82,9 +82,7 @@ struct HomeView: View {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .fill(Color(.systemGray6)) // or your brand color
 
-                Image("myko-logo-1")
-                    .resizable()
-                    .scaledToFill()
+                TapBounceLogo()
                     .frame(maxHeight: 260)
                 
             }
@@ -163,10 +161,14 @@ private struct FavoriteCardView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.9))
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -182,6 +184,27 @@ private struct FavoriteCardView: View {
         .shadow(color: .black.opacity(0.14), radius: 12, y: 6)
     }
 }
+
+private struct TapBounceLogo: View {
+    @State private var pressed = false
+
+    var body: some View {
+        Image("myko-logo-transparent")
+            .resizable()
+            .scaledToFit()
+            .frame(height: 240)
+            .scaleEffect(pressed ? 1.06 : 1.0)
+            .offset(y: pressed ? -6 : 0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: pressed)
+            .onTapGesture {
+                pressed = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    pressed = false
+                }
+            }
+    }
+}
+
 
 #Preview {
     HomeView()
