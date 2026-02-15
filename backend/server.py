@@ -1,41 +1,66 @@
 import uvicorn
-import base64
-import io
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from PIL import Image
 from agent import Agent
+from tracker import Tracker
+import json
 
 app = FastAPI()
 
-# Global Agent (Stateful)
-agent = Agent()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Init Global Instances
+tracker = Tracker()
+agent = Agent(tracker, debug=True)
 
 class ChatRequest(BaseModel):
     prompt: str
-    frame: str 
-
-# Debugging handler for 422 errors
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    print(f"❌ 422 Validation Error: {exc.errors()}")
-    print(request.headers.keys())
-    body = await request.body()
-    print(f"❌ Received Body: {body.decode()}")
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    frame: str | None = None
 
 @app.post("/query")
-def chat_endpoint(request: ChatRequest):
-    print(f"✅ Received prompt: {request.prompt}")
-    
+async def query_endpoint(request: ChatRequest):
+    # Pass prompt to agent. Agent will use tracker.latest_frame if request.frame is None
+    response = await agent.query(request.prompt, request.frame)
+    return {"response": response}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("✅ WS Connected")
+
     try:
-        response_text = agent.query(request.prompt, request.frame)
-        return {"response": response_text}
+        while True:
+            # 1. Receive Frame
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect()
+
+            base64_frame = None
+            if "text" in message:
+                try:
+                    data = json.loads(message["text"])
+                    base64_frame = data.get("frame")
+                except:
+                    base64_frame = message["text"] # Handle raw string case
+
+            if base64_frame:
+                # 2. Process (Decode -> Store -> Overlay -> Encode)
+                edited_frame = tracker.process_frame(base64_frame)
+                
+                # 3. Send Back
+                await websocket.send_text(edited_frame)
+
+    except WebSocketDisconnect:
+        print("❌ WS Disconnected")
     except Exception as e:
-        print(f"❌ Agent Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"⚠️ WS Error: {e}")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
