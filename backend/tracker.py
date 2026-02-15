@@ -1,6 +1,7 @@
 import base64
 import asyncio
 import json
+import os
 import cv2
 import numpy as np
 
@@ -14,6 +15,24 @@ except Exception:
     feature = None
     HAS_SKIMAGE = False
 
+try:
+    from cellpose import models as cellpose_models
+    HAS_CELLPOSE = False
+except Exception:
+    cellpose_models = None
+    HAS_CELLPOSE = False
+
+try:
+    import torch
+    from sam2.build_sam import build_sam2
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+    HAS_SAM2 = True
+except Exception:
+    torch = None
+    build_sam2 = None
+    SAM2AutomaticMaskGenerator = None
+    HAS_SAM2 = False
+
 
 class Segmenter:
     """Simple static segmentation - no tracking, just segment and render."""
@@ -22,8 +41,16 @@ class Segmenter:
         self.active_masks = []        # List of {contours, color, query} dicts
         self.latest_proposals = []    # List of {contour, area, circularity, center, bbox, score}
         self._latest_b64 = None       # raw base64 (no data-uri prefix)
+        self._original_dimensions = None  # (height, width) when proposals were made
         self._jpeg_quality = 75
         self._has_skimage = HAS_SKIMAGE
+        self._has_cellpose = HAS_CELLPOSE
+        self._has_sam2 = HAS_SAM2
+        self._default_backend = os.getenv("SEGMENTATION_BACKEND", "auto").strip().lower()
+        self._auto_fast_mode = os.getenv("SEGMENTATION_AUTO_FAST", "1").strip().lower() not in {"0", "false", "no"}
+
+        self._cellpose_model = None
+        self._sam2_mask_generator = None
         
         # Color palette for overlays
         self.colors = [
@@ -37,8 +64,49 @@ class Segmenter:
         ]
         self.color_idx = 0
         
-        backend = "skimage+opencv" if self._has_skimage else "opencv-only"
-        print(f"✅ Segmenter ready (static masks, no tracking, backend={backend})")
+        print(
+            "✅ Segmenter ready "
+            f"(default={self._default_backend}, skimage={self._has_skimage}, "
+            f"cellpose={self._has_cellpose}, sam2={self._has_sam2}, auto_fast={self._auto_fast_mode})"
+        )
+
+    def _resolve_backend(self, backend: str | None = None) -> str:
+        selected = (backend or self._default_backend or "auto").strip().lower()
+        if selected not in {"auto", "opencv", "cellpose", "sam2"}:
+            selected = "auto"
+
+        if selected == "auto":
+            # Preserve auto so dispatcher can try cellpose/sam2/opencv in order.
+            return "auto"
+
+        if selected == "cellpose" and not self._has_cellpose:
+            return "opencv"
+        if selected == "sam2" and not self._has_sam2:
+            return "opencv"
+        return selected
+
+    def _get_cellpose_model(self):
+        if not self._has_cellpose:
+            return None
+        if self._cellpose_model is None:
+            self._cellpose_model = cellpose_models.CellposeModel(gpu=torch.cuda.is_available())
+        return self._cellpose_model
+
+    def _get_sam2_generator(self):
+        if not self._has_sam2:
+            return None
+        if self._sam2_mask_generator is not None:
+            return self._sam2_mask_generator
+
+        ckpt = os.getenv("SAM2_CHECKPOINT", "").strip()
+        cfg = os.getenv("SAM2_MODEL_CFG", "sam2_hiera_t.yaml").strip()
+        if not ckpt:
+            return None
+
+        device = "cuda" if torch is not None and torch.cuda.is_available() else "cpu"
+        model = build_sam2(cfg, ckpt, device=device)
+        self._sam2_mask_generator = SAM2AutomaticMaskGenerator(model)
+        return self._sam2_mask_generator
 
     @staticmethod
     def _sanitize_contour(contour: np.ndarray) -> np.ndarray | None:
@@ -101,7 +169,12 @@ class Segmenter:
         }
 
     @staticmethod
-    def _query_score(query: str, feat: dict) -> float:
+    def _query_score(query: str, feat: dict, img_area: float = 1.0) -> float:
+        """Score a candidate contour for relevance to *query*.
+
+        All area thresholds are expressed as fractions of *img_area* so
+        the scoring is resolution-independent.
+        """
         q = (query or "").lower()
         score = 0.0
         area = feat["area"]
@@ -110,22 +183,31 @@ class Segmenter:
         h = max(feat["bbox"][3], 1)
         aspect = max(w, h) / max(1.0, min(w, h))
 
-        score += min(1.0, area / 250.0)
+        # Normalised area (fraction of image).  A typical microscopy
+        # red blood cell is ~0.5 %–2 % of the field-of-view.
+        rel_area = area / max(img_area, 1.0)
+
+        # Base score: prefer reasonably sized, round objects
+        score += min(1.0, rel_area / 0.0003)   # saturates at ~0.03 % of image
         score += circularity
 
         if "red blood" in q or "rbc" in q:
             score += 1.3 * circularity
-            if 40.0 <= area <= 700.0:
+            # RBC-sized sweet spot: 0.3 %–2.5 % of the image
+            if 0.003 <= rel_area <= 0.025:
                 score += 0.8
+            # Penalise very tiny specks (< 0.005 % of image)
+            if rel_area < 0.00005:
+                score -= 0.6
             if aspect <= 1.5:
                 score += 0.5
         elif "all" in q or "cell" in q:
             score += 0.3
 
         if "large" in q:
-            score += min(1.2, area / 1200.0)
+            score += min(1.2, rel_area / 0.002)
         if "small" in q:
-            score += 0.9 if area < 250.0 else -0.3
+            score += 0.9 if rel_area < 0.0003 else -0.3
 
         return float(score)
 
@@ -220,6 +302,7 @@ class Segmenter:
 
     def _build_candidate_mask(self, img: np.ndarray, roi_mask: np.ndarray) -> np.ndarray:
         """Build a robust foreground mask by combining multiple cues."""
+        h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -228,29 +311,53 @@ class Segmenter:
         gray_eq = clahe.apply(gray)
         gray_blur = cv2.GaussianBlur(gray_eq, (5, 5), 0)
 
+        sigma = max(10.0, float(min(h, w)) * 0.06)
+        bg = cv2.GaussianBlur(gray_eq, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        gray_norm = ((gray_eq.astype(np.float32) + 1.0) / (bg.astype(np.float32) + 1.0))
+        gray_norm = cv2.normalize(gray_norm, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        gray_norm_blur = cv2.GaussianBlur(gray_norm, (5, 5), 0)
+
         _, m_otsu = cv2.threshold(gray_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         m_adapt = cv2.adaptiveThreshold(
             gray_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, 31, 4
         )
+        _, m_otsu_norm = cv2.threshold(gray_norm_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        m_adapt_norm = cv2.adaptiveThreshold(
+            gray_norm_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 31, 3
+        )
+
+        blackhat_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        blackhat = cv2.morphologyEx(gray_norm_blur, cv2.MORPH_BLACKHAT, blackhat_kernel)
+        bh_thr = int(np.percentile(blackhat[roi_mask > 0], 75)) if np.any(roi_mask > 0) else 20
+        m_blackhat = (blackhat > max(12, bh_thr)).astype(np.uint8) * 255
 
         s = hsv[:, :, 1]
         s_thr = int(np.percentile(s[roi_mask > 0], 60)) if np.any(roi_mask > 0) else 40
-        m_sat = (s > max(25, s_thr)).astype(np.uint8) * 255
+        m_sat = (s > max(18, s_thr - 8)).astype(np.uint8) * 255
 
-        a = lab[:, :, 1].astype(np.int16)
+        a_u8 = lab[:, :, 1].astype(np.uint8)
+        a = a_u8.astype(np.int16)
         b = lab[:, :, 2].astype(np.int16)
         med_a = int(np.median(a[roi_mask > 0])) if np.any(roi_mask > 0) else 128
         med_b = int(np.median(b[roi_mask > 0])) if np.any(roi_mask > 0) else 128
         stain_dev = np.abs(a - med_a) + np.abs(b - med_b)
-        dev_thr = int(np.percentile(stain_dev[roi_mask > 0], 70)) if np.any(roi_mask > 0) else 30
+        dev_thr = int(np.percentile(stain_dev[roi_mask > 0], 65)) if np.any(roi_mask > 0) else 30
         m_stain = (stain_dev > max(18, dev_thr)).astype(np.uint8) * 255
+
+        a_thr = int(np.percentile(a_u8[roi_mask > 0], 62)) if np.any(roi_mask > 0) else 132
+        m_red = (a_u8 > max(128, a_thr)).astype(np.uint8) * 255
 
         votes = (m_otsu > 0).astype(np.uint8)
         votes += (m_adapt > 0).astype(np.uint8)
+        votes += (m_otsu_norm > 0).astype(np.uint8)
+        votes += (m_adapt_norm > 0).astype(np.uint8)
+        votes += (m_blackhat > 0).astype(np.uint8)
         votes += (m_sat > 0).astype(np.uint8)
         votes += (m_stain > 0).astype(np.uint8)
-        combined = (votes >= 2).astype(np.uint8) * 255
+        votes += (m_red > 0).astype(np.uint8)
+        combined = (votes >= 3).astype(np.uint8) * 255
 
         combined = cv2.bitwise_and(combined, roi_mask)
         kernel3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -366,14 +473,144 @@ class Segmenter:
         )
         return filtered
 
-    def _store_proposals(self, contours: list[np.ndarray], query: str, limit: int = 200) -> list[dict]:
+    def _find_contours_cellpose(self, img: np.ndarray, query: str) -> list:
+        model = self._get_cellpose_model()
+        if model is None:
+            return self._find_contours(img, query)
+
+        h, w = img.shape[:2]
+        region_mask = self._region_mask(query, h, w)
+        bgr = img.copy()
+        bgr[region_mask == 0] = 0
+
+        # Cellpose expects RGB
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        out = model.eval(
+            rgb,
+            diameter=None,
+            flow_threshold=0.4,
+            cellprob_threshold=0.0,
+            normalize=True,
+        )
+        if isinstance(out, tuple):
+            masks = out[0]
+        else:
+            masks = out
+
+        contours = []
+        max_label = int(np.max(masks)) if masks is not None else 0
+        min_area = max(12, int(h * w * 0.00001))
+        max_area = int(h * w * 0.05)
+
+        for label in range(1, max_label + 1):
+            inst = (masks == label).astype(np.uint8)
+            if not np.any(inst):
+                continue
+            area = int(np.sum(inst))
+            if area < min_area or area > max_area:
+                continue
+
+            cnts, _ = cv2.findContours(inst * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
+            contour = max(cnts, key=cv2.contourArea)
+            contour = self._sanitize_contour(contour)
+            if contour is not None:
+                contours.append(contour)
+
+        print(f"  🧫 Cellpose found {len(contours)} contours")
+        return contours
+
+    def _find_contours_sam2(self, img: np.ndarray, query: str) -> list:
+        generator = self._get_sam2_generator()
+        if generator is None:
+            return self._find_contours(img, query)
+
+        h, w = img.shape[:2]
+        region_mask = self._region_mask(query, h, w)
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        masks = generator.generate(rgb)
+        contours = []
+        min_area = max(12, int(h * w * 0.00001))
+        max_area = int(h * w * 0.05)
+
+        for md in masks:
+            seg = md.get("segmentation")
+            if seg is None:
+                continue
+            seg_u8 = seg.astype(np.uint8)
+            seg_u8[region_mask == 0] = 0
+            area = int(np.sum(seg_u8 > 0))
+            if area < min_area or area > max_area:
+                continue
+
+            cnts, _ = cv2.findContours(seg_u8 * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
+            contour = max(cnts, key=cv2.contourArea)
+            contour = self._sanitize_contour(contour)
+            if contour is not None:
+                contours.append(contour)
+
+        print(f"  🧠 SAM2 found {len(contours)} contours")
+        return contours
+
+    def _find_contours_dispatch(self, img: np.ndarray, query: str, backend: str | None = None) -> tuple[list, str]:
+        mode = (backend or self._default_backend or "auto").strip().lower()
+        if mode == "auto":
+            # Always run fast OpenCV first for low latency.
+            opencv_contours = self._find_contours(img, query)
+            if self._auto_fast_mode:
+                return opencv_contours, "opencv"
+
+            # Optional slower refinement mode: only try heavier backends when
+            # OpenCV confidence/recall appears low.
+            best_contours = opencv_contours
+            best_backend = "opencv"
+            baseline = max(1, len(opencv_contours))
+
+            plans = ["cellpose", "sam2"]
+            for selected in plans:
+                if selected == "cellpose" and not self._has_cellpose:
+                    continue
+                if selected == "sam2" and not self._has_sam2:
+                    continue
+                try:
+                    if selected == "cellpose":
+                        contours = self._find_contours_cellpose(img, query)
+                    else:
+                        contours = self._find_contours_sam2(img, query)
+
+                    # Only switch if meaningfully better recall.
+                    if len(contours) >= int(1.2 * baseline) and len(contours) > len(best_contours):
+                        best_contours = contours
+                        best_backend = selected
+                except Exception as err:
+                    print(f"⚠️ Backend '{selected}' failed in auto mode: {err}")
+
+            return best_contours, best_backend
+
+        selected = self._resolve_backend(mode)
+        try:
+            if selected == "cellpose":
+                return self._find_contours_cellpose(img, query), selected
+            if selected == "sam2":
+                return self._find_contours_sam2(img, query), selected
+            return self._find_contours(img, query), "opencv"
+        except Exception as err:
+            print(f"⚠️ Backend '{selected}' failed: {err} — falling back to opencv")
+            return self._find_contours(img, query), "opencv"
+
+    def _store_proposals(self, contours: list[np.ndarray], query: str, img_shape: tuple, limit: int = 400) -> list[dict]:
+        img_area = float(img_shape[0]) * float(img_shape[1])  # h * w
         proposals = []
         for contour in contours:
             contour = self._sanitize_contour(contour)
             if contour is None:
                 continue
             feat = self._contour_features(contour)
-            score = self._query_score(query, feat)
+            score = self._query_score(query, feat, img_area=img_area)
             proposals.append({
                 "contour": contour,
                 "area": feat["area"],
@@ -385,27 +622,64 @@ class Segmenter:
 
         proposals.sort(key=lambda p: p["score"], reverse=True)
         self.latest_proposals = proposals[:max(1, limit)]
+        self._original_dimensions = img_shape[:2]  # Store (height, width)
         return self.latest_proposals
 
-    async def propose_masks(self, query: str, frame_b64: str | None = None) -> str:
+    async def propose_masks(self, query: str, frame_b64: str | None = None, backend: str | None = None) -> str:
         img = None
-        if self._latest_b64:
-            img = self._decode(self._latest_b64)
+        source = None
 
-        if img is None and frame_b64:
+        # Prefer the explicitly-provided frame (sent with the POST /query)
+        # over _latest_b64, which races with the WS stream and may be a
+        # completely different camera view by now.
+        if frame_b64:
             raw = frame_b64.split(',', 1)[-1] if ',' in frame_b64 else frame_b64
             img = self._decode(raw)
+            if img is not None:
+                source = "frame_b64"
+                # Pin this frame so render_frame uses the same reference
+                self._latest_b64 = raw
+
+        if img is None and self._latest_b64:
+            img = self._decode(self._latest_b64)
+            source = "_latest_b64"
 
         if img is None:
             return "No image available - send a frame over the WebSocket first."
 
-        print(f"🔬 Proposing masks for: '{query}'")
-        contours = await asyncio.to_thread(self._find_contours, img, query)
+        requested_backend = (backend or self._default_backend or "auto").strip().lower()
+        selected_backend = self._resolve_backend(requested_backend)
+        print(f"🔬 Proposing masks for: '{query}' (backend={selected_backend}, source={source}, img={img.shape[1]}x{img.shape[0]})")
+        timeout_sec = {
+            "opencv": 2.0,
+            "cellpose": 8.0,
+            "sam2": 10.0,
+            "auto": 12.0,
+        }.get(selected_backend, 6.0)
+
+        try:
+            contours, used_backend = await asyncio.wait_for(
+                asyncio.to_thread(self._find_contours_dispatch, img, query, selected_backend),
+                timeout=timeout_sec,
+            )
+        except TimeoutError:
+            print(f"⚠️ Segmentation timeout on backend={selected_backend}; falling back to opencv")
+            if selected_backend != "opencv":
+                contours, used_backend = await asyncio.to_thread(
+                    self._find_contours_dispatch,
+                    img,
+                    query,
+                    "opencv",
+                )
+            else:
+                contours, used_backend = [], "opencv"
+
         if not contours:
             self.latest_proposals = []
-            return json.dumps({"count": 0, "candidates": []})
+            self._original_dimensions = None
+            return json.dumps({"count": 0, "backend": used_backend, "candidates": []})
 
-        proposals = self._store_proposals(contours, query)
+        proposals = self._store_proposals(contours, query, img.shape)
         preview = []
         for i, p in enumerate(proposals[:60]):
             preview.append({
@@ -417,7 +691,7 @@ class Segmenter:
                 "score": round(float(p["score"]), 3),
             })
 
-        return json.dumps({"count": len(proposals), "candidates": preview})
+        return json.dumps({"count": len(proposals), "backend": used_backend, "candidates": preview})
 
     def apply_masks(self, indices: list[int], query: str = "selected masks") -> str:
         if not self.latest_proposals:
@@ -433,7 +707,23 @@ class Segmenter:
         if not valid:
             return "No valid proposal indices provided."
 
-        max_selected = 40
+        max_selected = 220
+
+        # If user asked for all/every, don't depend on tool-selected subset.
+        q = (query or "").lower()
+        if ("all" in q or "every" in q) and len(self.latest_proposals) > len(valid):
+            valid = list(range(min(max_selected, len(self.latest_proposals))))
+
+        wants_specific = any(token in q for token in ["single", "one", "top", "best", "largest", "smallest"]) 
+        if not wants_specific and self.latest_proposals:
+            scores = [float(p.get("score", 0.0)) for p in self.latest_proposals]
+            peak = max(scores) if scores else 0.0
+            # Include all proposals with "reasonable" confidence relative to peak.
+            conf_floor = peak * 0.72
+            conf_indices = [i for i, p in enumerate(self.latest_proposals) if float(p.get("score", 0.0)) >= conf_floor]
+            if len(conf_indices) > len(valid):
+                valid = sorted(set(valid).union(conf_indices))
+
         valid = valid[:max_selected]
 
         selected = []
@@ -451,18 +741,20 @@ class Segmenter:
         color = self.colors[self.color_idx % len(self.colors)]
         self.color_idx += 1
 
-        raster = None
-        if self._latest_b64:
-            img = self._decode(self._latest_b64)
-            if img is not None:
-                h, w = img.shape[:2]
-                raster = self._contours_to_binary_mask(h, w, selected)
-
+        # Store original contours + the dimensions they were computed at.
+        # render_frame will scale from these originals for any output size.
+        orig_dims = self._original_dimensions  # (h, w) from propose_masks
+        normalized = self._normalize_contours(selected, orig_dims)
+        print(f"📐 apply_masks: original_dimensions={orig_dims}, contours={len(selected)}")
         self.active_masks.append({
-            "contours": selected,
+            "original_contours": selected,       # never modified
+            "normalized_contours": normalized,   # preferred scaling representation
+            "original_dimensions": orig_dims,    # (h, w) they were found at
+            "contours": None,                    # scaled copy – computed lazily
+            "raster": None,                      # binary mask  – computed lazily
+            "scaled_for": None,                  # (h, w) the cache is valid for
             "color": color,
             "query": query,
-            "raster": raster,
         })
         return f"Applied {len(selected)} mask(s) from indices {valid[:20]} for '{query}'."
 
@@ -490,8 +782,100 @@ class Segmenter:
         count = len(self.active_masks)
         self.active_masks.clear()
         self.latest_proposals = []
+        self._original_dimensions = None
         self.color_idx = 0
         return f"Cleared {count} mask(s)."
+
+    # ------------------------------------------------------------------
+    # Scaling helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_contours(contours: list[np.ndarray], dims: tuple[int, int] | None) -> list[np.ndarray] | None:
+        """Convert contours to [0,1] coordinates so scaling is resolution-independent."""
+        if not dims:
+            return None
+        h, w = dims
+        if h <= 0 or w <= 0:
+            return None
+
+        normalized = []
+        for contour in contours:
+            if contour is None:
+                continue
+            c = np.asarray(contour).copy().astype(np.float64)
+            if c.ndim != 3 or c.shape[2] != 2:
+                continue
+            c[:, :, 0] = np.clip(c[:, :, 0] / float(w), 0.0, 1.0)
+            c[:, :, 1] = np.clip(c[:, :, 1] / float(h), 0.0, 1.0)
+            normalized.append(c)
+        return normalized
+
+    @staticmethod
+    def _contours_from_normalized(norm_contours: list[np.ndarray], h: int, w: int) -> list[np.ndarray]:
+        """Project normalized contours to integer pixel coordinates for a target frame."""
+        if h <= 0 or w <= 0:
+            return []
+
+        projected = []
+        for contour in norm_contours:
+            if contour is None:
+                continue
+            c = np.asarray(contour).copy().astype(np.float64)
+            if c.ndim != 3 or c.shape[2] != 2:
+                continue
+            c[:, :, 0] = np.clip(np.rint(c[:, :, 0] * float(w)), 0, max(0, w - 1))
+            c[:, :, 1] = np.clip(np.rint(c[:, :, 1] * float(h)), 0, max(0, h - 1))
+            projected.append(c.astype(np.int32))
+        return projected
+
+    @staticmethod
+    def _scale_contours(
+        contours: list[np.ndarray],
+        orig_h: int, orig_w: int,
+        dst_h: int, dst_w: int,
+    ) -> list[np.ndarray]:
+        """Scale a list of contours from (orig_h, orig_w) to (dst_h, dst_w)."""
+        if orig_h == dst_h and orig_w == dst_w:
+            return [c.copy() for c in contours if c is not None]
+
+        scale_x = dst_w / max(orig_w, 1)
+        scale_y = dst_h / max(orig_h, 1)
+
+        scaled = []
+        for contour in contours:
+            if contour is None:
+                continue
+            c = contour.copy().astype(np.float64)
+            c[:, :, 0] *= scale_x   # x
+            c[:, :, 1] *= scale_y   # y
+            scaled.append(c.astype(np.int32))
+        return scaled
+
+    def _ensure_scaled(self, md: dict, h: int, w: int) -> None:
+        """Lazily (re-)compute scaled contours + raster for a mask dict.
+
+        Always scales from *original_contours* so errors never accumulate.
+        """
+        if md.get("scaled_for") == (h, w) and md.get("raster") is not None:
+            return  # cache hit
+
+        norm_contours = md.get("normalized_contours")
+        orig_contours = md.get("original_contours", [])
+        orig_dims = md.get("original_dimensions")  # (orig_h, orig_w)
+
+        if norm_contours:
+            scaled = self._contours_from_normalized(norm_contours, h, w)
+        elif orig_dims is not None:
+            orig_h, orig_w = orig_dims
+            scaled = self._scale_contours(orig_contours, orig_h, orig_w, h, w)
+        else:
+            # Fallback: assume contours are already at current resolution
+            scaled = [c.copy() for c in orig_contours if c is not None]
+
+        md["contours"] = scaled
+        md["raster"] = self._contours_to_binary_mask(h, w, scaled)
+        md["scaled_for"] = (h, w)
 
     def render_frame(self, b64_frame: str) -> str:
         """Render the current frame with static mask overlays.
@@ -514,11 +898,12 @@ class Segmenter:
 
         h, w = img.shape[:2]
 
-        # Ensure static rasters are present for fast per-frame rendering.
+        # Ensure scaled contours + rasters match current frame dimensions.
         for md in self.active_masks:
-            raster = md.get("raster")
-            if raster is None or raster.shape[:2] != (h, w):
-                md["raster"] = self._contours_to_binary_mask(h, w, md.get("contours", []))
+            orig = md.get("original_dimensions")
+            if orig and orig != (h, w):
+                print(f"⚠️ render_frame: frame={w}x{h} vs segmentation={orig[1]}x{orig[0]} — scaling")
+            self._ensure_scaled(md, h, w)
         
         # Draw all active masks with strong fill + clear boundaries
         fill_layer = np.zeros_like(img, dtype=np.uint8)
@@ -530,35 +915,13 @@ class Segmenter:
                 continue
             fill_layer[raster > 0] = color
 
-        cv2.addWeighted(fill_layer, 0.42, img, 0.58, 0, dst=img)
+        cv2.addWeighted(fill_layer, 0.55, img, 0.45, 0, dst=img)
 
-<<<<<<< Updated upstream
-            if self.active_masks:
-                overlay = img.copy()
-                for query, md in self.active_masks.items():
-                    color = md["color"]
-                    contours = md["contours"]
-
-                    # Draw filled contours with transparency
-                    cv2.drawContours(overlay, contours, -1, color, cv2.FILLED)
-                    # Draw outlines for crisp edges
-                    cv2.drawContours(img, contours, -1, color, 1)
-
-                img = cv2.addWeighted(overlay, 0.25, img, 0.75, 0)
-
-            _, out_buf = cv2.imencode('.jpg', img)
-            return base64.b64encode(out_buf).decode('utf-8')
-
-        except Exception as e:
-            print(f"⚠️ Frame error: {e}")
-            traceback.print_exc()
-            return b64_frame
-=======
         for mask in self.active_masks:
             contours = [self._sanitize_contour(c) for c in mask.get("contours", [])]
             contours = [c for c in contours if c is not None]
             if contours:
-                cv2.drawContours(img, contours, -1, mask["color"], thickness=2)
+                thickness = max(2, int(round(min(h, w) * 0.003)))
+                cv2.drawContours(img, contours, -1, mask["color"], thickness=thickness)
         
         return self._encode(img)
->>>>>>> Stashed changes

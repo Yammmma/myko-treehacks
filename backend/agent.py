@@ -26,6 +26,11 @@ class Agent:
                             "query": {
                                 "type": "string",
                                 "description": "Segmentation intent, such as 'red blood cells', 'all cells', or 'cells at bottom'."
+                            },
+                            "backend": {
+                                "type": "string",
+                                "enum": ["auto", "cellpose", "sam2", "opencv"],
+                                "description": "Optional backend override for mask proposals. Prefer auto unless user asks otherwise."
                             }
                         },
                         "required": ["query"]
@@ -190,7 +195,8 @@ class Agent:
 
                 if tool_call.function.name == "propose_masks":
                     query = (args.get("query") or "all cells").strip()
-                    result = await self.segmenter.propose_masks(query, frame_b64)
+                    backend = (args.get("backend") or "auto").strip().lower()
+                    result = await self.segmenter.propose_masks(query, frame_b64, backend=backend)
                 elif tool_call.function.name == "apply_masks":
                     indices = args.get("indices") or []
                     query = (args.get("query") or "selected masks").strip()
