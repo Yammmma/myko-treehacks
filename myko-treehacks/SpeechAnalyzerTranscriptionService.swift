@@ -17,6 +17,7 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
         case permissionDenied
         case setupFailed
         case invalidAudioDataType
+        case alreadyRecording
 
         var errorDescription: String? {
             switch self {
@@ -28,7 +29,10 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
                 return "Failed to set up speech transcription."
             case .invalidAudioDataType:
                 return "Invalid audio format for SpeechAnalyzer."
+            case .alreadyRecording:
+                return "Speech transcription is already running."
             }
+            
         }
     }
 
@@ -50,7 +54,9 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
     private var volatileTranscript = ""
 
     func startRecording(locale: Locale = .current, onTranscriptUpdate: @escaping (String) -> Void) async throws {
-        guard !isRecording, !isStartingRecording else { return }
+        guard !isRecording, !isStartingRecording else {
+            throw TranscriptionError.alreadyRecording
+        }
         isStartingRecording = true
 
         do {

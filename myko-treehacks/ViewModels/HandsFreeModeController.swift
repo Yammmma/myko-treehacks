@@ -99,7 +99,9 @@ final class HandsFreeModeController: ObservableObject {
         guard isEnabled, !isCapturingCommand else { return }
 
         if service.isRecording {
-            await service.stopRecording()
+            isArmed = true
+            statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
+            return
         }
         
         do {
@@ -109,6 +111,9 @@ final class HandsFreeModeController: ObservableObject {
                 self.processWakeTranscript(transcript)
             }
             isArmed = true
+        } catch SpeechAnalyzerTranscriptionService.TranscriptionError.alreadyRecording {
+            isArmed = true
+            statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
         } catch {
             statusText = "Hands-Free unavailable: \(error.localizedDescription)"
             isEnabled = false
@@ -176,6 +181,25 @@ final class HandsFreeModeController: ObservableObject {
 
             if !initialText.isEmpty {
                 restartSilenceTimer()
+            }
+        } catch SpeechAnalyzerTranscriptionService.TranscriptionError.alreadyRecording {
+            // A stale recording session is still active; reset and retry command capture once.
+            await service.stopRecording()
+            do {
+                try await service.startRecording { [weak self] transcript in
+                    guard let self else { return }
+                    self.commandBuffer = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.onCommandUpdate?(self.commandBuffer)
+                    self.restartSilenceTimer()
+                }
+
+                if !initialText.isEmpty {
+                    restartSilenceTimer()
+                }
+            } catch {
+                statusText = "Command capture failed"
+                isCapturingCommand = false
+                await armWakeListening()
             }
         } catch {
             statusText = "Command capture failed"
