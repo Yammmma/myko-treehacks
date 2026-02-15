@@ -36,7 +36,7 @@ struct OnboardingView: View {
             OnboardingPage(
                 imageName: "myko-position2",
                 title: "Voice Dictation",
-                bodyText: "Use your voice to describe samples and add notes hands-free.",
+                bodyText: "Use your voice to issue commands for hands-free cell analysis.",
                 buttonTitle: micButtonTitle,
                 pageIndex: 2,
                 currentPage: $currentPage,

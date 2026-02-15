@@ -33,7 +33,7 @@ final class HandsFreeModeController: ObservableObject {
     
     private let silenceTimeout: TimeInterval = 1.4
     private lazy var wakePhraseRegex: NSRegularExpression? = {
-        let pattern = #"\bhey[\s,!.?\-]*((myk[o0])|(myco)|(miko)|(mike\s*o)|(michael))\b"#
+        let pattern = #"\bhey[\s,!.?\-]*((myk[o0])|(myco)|(miko)|(mike\s*o)|(michael)|(meek\s*o?h?)|(meeko)|(mi\s*go)|(migo))\b"#
         return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
     }()
 
@@ -99,9 +99,7 @@ final class HandsFreeModeController: ObservableObject {
         guard isEnabled, !isCapturingCommand else { return }
 
         if service.isRecording {
-            isArmed = true
-            statusText = "🎙️ Listening for \"\(wakePhraseDisplay)\""
-            return
+            await service.stopRecording()
         }
         
         do {
@@ -123,8 +121,7 @@ final class HandsFreeModeController: ObservableObject {
 
     private func processWakeTranscript(_ transcript: String) {
         guard isArmed, !wakeTransitionInProgress else { return }
-        let normalized = normalizeForWakeDetection(transcript)
-        guard wakePhraseAliases.contains(where: normalized.contains) else { return }
+        guard containsWakePhrase(in: transcript) else { return }
         wakeTransitionInProgress = true
         isArmed = false
         
@@ -137,6 +134,20 @@ final class HandsFreeModeController: ObservableObject {
             await startCommandCapture(initialText: suffix)
             wakeTransitionInProgress = false
         }
+    }
+    
+    private func containsWakePhrase(in transcript: String) -> Bool {
+        let normalized = normalizeForWakeDetection(transcript)
+        if wakePhraseAliases.contains(where: normalized.contains) {
+            return true
+        }
+
+        guard let wakePhraseRegex else {
+            return false
+        }
+
+        let fullRange = NSRange(transcript.startIndex..<transcript.endIndex, in: transcript)
+        return wakePhraseRegex.firstMatch(in: transcript, options: [], range: fullRange) != nil
     }
 
     private func normalizeForWakeDetection(_ text: String) -> String {

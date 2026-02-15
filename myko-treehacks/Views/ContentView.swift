@@ -18,6 +18,18 @@ private struct NotesInferenceResponse: Codable {
     let response: String
 }
 
+private let screenshotNotesPrompt = """
+You are generating notes for a saved microscope screenshot in the Myko camera view.
+Write 1–2 concise, confident sentences describing the tissue and cell morphology that are visible.
+Use technical pathology language, avoid hedging, and do not ask for additional input.
+"""
+
+private let screenshotTitlePrompt = """
+You are generating a very short title for a saved microscope screenshot in the Myko camera view.
+Return only a 1-2 word title that captures the key visible finding.
+Use concise technical wording and no punctuation.
+"""
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
@@ -29,7 +41,7 @@ struct ContentView: View {
 //    @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
-    @State private var handsFreeEnabled = false
+//    @State private var handsFreeEnabled = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -69,18 +81,18 @@ struct ContentView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 6) {
-                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                            .onChange(of: handsFreeEnabled) { _, enabled in
-                                handsFreeController.updateMode(
-                                    enabled: enabled,
-                                    appIsForegrounded: scenePhase == .active,
-                                    onCommandUpdate: updateHandsFreeDraft,
-                                    onExecute: runHandsFreeCommand
-                                )
-                            }
-                        
+//                        Toggle("Hands-Free Mode", isOn: $handsFreeEnabled)
+//                            .toggleStyle(.switch)
+//                            .labelsHidden()
+//                            .onChange(of: handsFreeEnabled) { _, enabled in
+//                                handsFreeController.updateMode(
+//                                    enabled: enabled,
+//                                    appIsForegrounded: scenePhase == .active,
+//                                    onCommandUpdate: updateHandsFreeDraft,
+//                                    onExecute: runHandsFreeCommand
+//                                )
+//                            }
+//
                         Text(handsFreeController.statusText)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -124,10 +136,11 @@ struct ContentView: View {
             if !chat.isChatExpanded {
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        // TODO: hook up editing box toggle later
+                        endpoint.toggleBoundingBoxVisibility()
                     } label: {
-                        Image(systemName: "crop") // later: swap based on editing state
+                        Image(systemName: "crop")
                     }
+                    .accessibilityLabel(endpoint.isBoundingBoxVisible ? "Hide bounding box" : "Show bounding box")
                 }
                 
                 ToolbarItem(placement: .bottomBar) {
@@ -182,6 +195,16 @@ struct ContentView: View {
         }
         .onAppear {
             endpoint.onCapture = handleCapturedImage
+            endpoint.openEndpoint()
+            handsFreeController.updateMode(
+                enabled: true,
+                appIsForegrounded: scenePhase == .active,
+                onCommandUpdate: updateHandsFreeDraft,
+                onExecute: runHandsFreeCommand
+            )
+        }
+        .onDisappear {
+            endpoint.closeEndpoint()
         }
         .onChange(of: scenePhase) { _, phase in
             handsFreeController.updateForegroundState(isForegrounded: phase == .active)
@@ -204,6 +227,15 @@ struct ContentView: View {
                 }
             }
             
+            Task {
+                let generatedTitle = await generateTitle(for: image)
+                guard let generatedTitle else { return }
+
+                await MainActor.run {
+                    appState.historyStore.updateTitle(for: savedItem.id, title: generatedTitle)
+                }
+            }
+            
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.5))
                 showSavedToast = false
@@ -221,7 +253,7 @@ struct ContentView: View {
         guard let frameB64 = image.base64EncodedString() else { return nil }
 
         let requestPayload = NotesInferenceRequest(
-            prompt: "Write 1–2 concise sentences describing what is visible in this microscope image. If uncertain, say 'Uncertain' and suggest what to adjust.",
+            prompt: screenshotNotesPrompt,
             frame: frameB64
         )
 
@@ -240,6 +272,38 @@ struct ContentView: View {
             return nil
         }
     }
+    
+    private func generateTitle(for image: UIImage) async -> String? {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/query") else { return nil }
+        guard let frameB64 = image.base64EncodedString() else { return nil }
+
+        let requestPayload = NotesInferenceRequest(
+            prompt: screenshotTitlePrompt,
+            frame: frameB64
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestPayload)
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoded = try JSONDecoder().decode(NotesInferenceResponse.self, from: data)
+            let trimmed = decoded.response
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: ".", with: "")
+            guard !trimmed.isEmpty else { return nil }
+
+            let words = trimmed.split(whereSeparator: \.isWhitespace)
+            guard !words.isEmpty else { return nil }
+            return words.prefix(3).joined(separator: " ")
+        } catch {
+            return nil
+        }
+    }
+    
     
 //    @MainActor
 //    private func toggleRecording() async {

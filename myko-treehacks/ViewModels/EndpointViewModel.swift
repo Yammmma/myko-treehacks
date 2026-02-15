@@ -19,6 +19,8 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     @Published var capturedImage: UIImage? = nil
     @Published var annotatedImage: UIImage? = nil
     var onCapture: ((UIImage) -> Void)?
+    @Published var boundingBoxNormalized: CGRect = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
+    @Published var isBoundingBoxVisible = false
     
     // --- Camera Properties ---
     private let session = AVCaptureSession()
@@ -29,6 +31,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     private let outputQueue = DispatchQueue(label: "camera.video.output.queue")
     private let ciContext = CIContext()
     private var pendingSnapshotRequests: [((UIImage?) -> Void)] = []
+    private var intervalTimer: Timer? = nil
     
     // --- Network Properties ---
     private var webSocketTask: URLSessionWebSocketTask?
@@ -54,21 +57,14 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     
     init(onCapture: ((UIImage) -> Void)? = nil) {
         super.init()
-        
         self.onCapture = onCapture
-        
-        configureSession()
-        setupWebSocket()
-        
-        // Continuous capture loop for WebSocket Streaming
-        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { [self] _ in
-            captureImage(mode: .stream)
-        }
+//        openEndpoint()
     }
     
     func captureImage(mode: CaptureMode, prompt: String? = nil) {
         requestSnapshot { [self] image in
             guard let img = image else { return }
+            let analysisImage = imageWithBoundingBoxOverlay(from: img)
             
             DispatchQueue.main.async {
                 self.capturedImage = img
@@ -77,7 +73,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
             // Route based on mode
             switch mode {
             case .stream:
-                sendFrameWS(image: img)
+                sendFrameWS(image: analysisImage)
                 break
             case .query:
                 guard let prompt else {
@@ -85,10 +81,16 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
                     return
                 }
                 
-                makeInferenceHTTP(prompt: prompt, image: img)
+                makeInferenceHTTP(prompt: prompt, image: analysisImage)
             case .manualCapture:
                 onCapture?(img)
             }
+        }
+    }
+    
+    func toggleBoundingBoxVisibility() {
+        DispatchQueue.main.async {
+            self.isBoundingBoxVisible.toggle()
         }
     }
     
@@ -281,6 +283,44 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         return context.makeImage()
     }
     
+    private func imageWithBoundingBoxOverlay(from image: UIImage) -> UIImage {
+        let normalizedRect: CGRect
+        let isVisible: Bool
+        if Thread.isMainThread {
+            normalizedRect = self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            isVisible = self.isBoundingBoxVisible
+        } else {
+            (normalizedRect, isVisible) = DispatchQueue.main.sync {
+                (
+                    self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1)),
+                    self.isBoundingBoxVisible
+                )
+            }
+        }
+
+        guard isVisible else { return image }
+
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+
+            let strokeRect = CGRect(
+                x: normalizedRect.minX * image.size.width,
+                y: normalizedRect.minY * image.size.height,
+                width: normalizedRect.width * image.size.width,
+                height: normalizedRect.height * image.size.height
+            ).integral
+
+            let path = UIBezierPath(rect: strokeRect)
+            UIColor.black.withAlphaComponent(0.08).setFill()
+            path.fill()
+
+            UIColor.white.setStroke()
+            path.lineWidth = 4
+            path.stroke()
+        }
+    }
+    
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard !pendingSnapshotRequests.isEmpty else { return }
         let requesters = pendingSnapshotRequests
@@ -298,11 +338,60 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         requesters.forEach { $0(uiImage) }
     }
     
-    deinit {
+    func openEndpoint() {
+        configureSession()
+        setupWebSocket()
+        
+        // Continuous capture loop for WebSocket Streaming
+        intervalTimer = Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { [self] _ in
+            captureImage(mode: .stream)
+        }
+    }
+    
+    func closeEndpoint() {
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        sendClear()
         if deviceLockAcquired {
             device?.unlockForConfiguration()
         }
         if session.isRunning { session.stopRunning() }
+        intervalTimer?.invalidate()
+        intervalTimer = nil
+    }
+    
+    func sendClear() {
+        guard let url = URL(string: "https://\(ENDPOINT_URL_BASE)/clear") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ HTTP Error: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("Clear call received with status \(httpResponse.statusCode)")
+            }
+        }
+        
+        task.resume()
+    }
+    
+    deinit {
+        closeEndpoint()
+    }
+}
+
+private extension CGRect {
+    func clamped(to bounds: CGRect) -> CGRect {
+        let minX = max(bounds.minX, min(self.minX, bounds.maxX))
+        let minY = max(bounds.minY, min(self.minY, bounds.maxY))
+        let maxX = max(minX, min(self.maxX, bounds.maxX))
+        let maxY = max(minY, min(self.maxY, bounds.maxY))
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }
