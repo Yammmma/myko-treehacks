@@ -22,6 +22,7 @@ final class ChatViewModel: ObservableObject {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        print("Sending message: \(trimmed)")
         messages.append(ChatMessage(role: .user, text: trimmed))
         draft = ""
         isSending = true

@@ -21,8 +21,10 @@ final class AppState: ObservableObject {
 
     init() {
         historyStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
+            .sink { _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.objectWillChange.send()
+                }
             }
             .store(in: &cancellables)
     }

@@ -12,8 +12,7 @@ import CoreImage
 import CoreVideo
 import Combine
 
-// Ensure this matches your ngrok URL exactly
-let ENDPOINT_URL_BASE = "547e-171-66-12-188.ngrok-free.app"
+let ENDPOINT_URL_BASE = "cyan-masks-enjoy.loca.lt"
 
 struct CameraView: View {
     var captureTrigger: Int = 0
@@ -135,7 +134,7 @@ private struct CameraPreview: UIViewRepresentable {
         }
         
         // Continuous capture loop (15 FPS) for WebSocket Streaming
-        Timer.scheduledTimer(withTimeInterval: 1/15, repeats: true) { _ in
+        Timer.scheduledTimer(withTimeInterval: 1/5, repeats: true) { _ in
             captureImage(context: context, mode: .stream)
         }
         
@@ -176,6 +175,7 @@ private struct CameraPreview: UIViewRepresentable {
             switch mode {
             case .stream:
                 context.coordinator.sendFrameWS(image: img)
+                break
             case .query:
                 context.coordinator.makeInferenceHTTP(prompt: pendingPrompt, image: img)
             case .manualCapture:
@@ -257,7 +257,7 @@ private struct CameraPreview: UIViewRepresentable {
                 }
                 
                 if let imageData = Data(base64Encoded: sanitized, options: .ignoreUnknownCharacters),
-                    let image = UIImage(data: imageData) {
+                   let image = UIImage(data: imageData) {
                     DispatchQueue.main.async { self.onFrameReceived?(image) }
                 }
             case .data(let data):
@@ -308,6 +308,8 @@ private struct CameraPreview: UIViewRepresentable {
                         return
                     }
                     if let data = data {
+                        print(String(data: data, encoding: .utf8))
+                        
                         Task { @MainActor in
                             do {
                                 let result = try JSONDecoder().decode(InferenceHTTPResponse.self, from: data)
@@ -416,12 +418,15 @@ private struct CameraPreview: UIViewRepresentable {
             let requesters = pendingSnapshotRequests
             pendingSnapshotRequests.removeAll()
             
-            guard let cg = cgImage(from: sampleBuffer),
-                    let masked = circularMaskedImage(from: cg) else {
-                requesters.forEach { $0(nil) }
-                return
-            }
-            let uiImage = UIImage(cgImage: masked)
+//            guard let cg = cgImage(from: sampleBuffer),
+//                    let masked = circularMaskedImage(from: cg) else {
+//                requesters.forEach { $0(nil) }
+//                return
+//            }
+//            let uiImage = UIImage(cgImage: masked)
+            
+            let uiImage = UIImage(named: "cell1")
+            
             requesters.forEach { $0(uiImage) }
         }
         
@@ -460,6 +465,22 @@ extension UIImage {
         let base64String = imageData.base64EncodedString(options: [])
         // IMPORTANT: Sending Data URI prefix for compatibility
         return "data:image/jpeg;base64,\(base64String)"
+    }
+    
+    func changeWhiteToTransparent() -> UIImage? {
+        guard let rawImageRef = self.cgImage else { return nil }
+
+        // Define the color range for masking (white and near-white colors)
+        // The range is [min_red, max_red, min_green, max_green, min_blue, max_blue]
+        let colorMasking: [CGFloat] = [255, 255, 255, 255, 255, 255]
+
+        // Create a masked image reference
+        guard let maskedImageRef = rawImageRef.copy(maskingColorComponents: colorMasking) else { return nil }
+        
+        // Create a new UIImage from the masked image reference
+        let newImage = UIImage(cgImage: maskedImageRef)
+        
+        return newImage
     }
 }
 

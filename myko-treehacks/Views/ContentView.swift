@@ -149,6 +149,9 @@ struct ContentView: View {
                 try? await Task.sleep(for: .seconds(1.5))
                 showSavedToast = false
             }
+            
+            // Debug photo capture
+            UIImageWriteToSavedPhotosAlbum(image, self, nil, nil)
         } catch {
             captureError = "Couldn't save screenshot to History."
         }
