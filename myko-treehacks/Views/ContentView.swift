@@ -130,11 +130,11 @@ struct ContentView: View {
             if !chat.isChatExpanded {
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        endpoint.toggleBoundingBoxLock()
+                        endpoint.toggleBoundingBoxVisibility()
                     } label: {
                         Image(systemName: "crop")
                     }
-                    .accessibilityLabel(endpoint.isBoundingBoxLocked ? "Unlock bounding box" : "Lock bounding box")
+                    .accessibilityLabel(endpoint.isBoundingBoxVisible ? "Hide bounding box" : "Show bounding box")
                 }
                 
                 ToolbarItem(placement: .bottomBar) {

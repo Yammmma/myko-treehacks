@@ -31,22 +31,21 @@ struct CameraView: View {
                             let image = endpoint.annotatedImage ?? capturedImage
                             let previewBounds = CGRect(origin: .zero, size: geometry.size)
                             let fittedBounds = aspectFitRect(for: image.size, in: previewBounds)
-
+                            
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFit()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+                            
                             BoundingBoxOverlay(
                                 normalizedRect: $endpoint.boundingBoxNormalized,
                                 bounds: fittedBounds,
-                                isLocked: endpoint.isBoundingBoxLocked
-                            )
+                                isVisible: endpoint.isBoundingBoxVisible                           )
                         }                    } else {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .padding()
-                    }
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .padding()
+                        }
                     
                     Spacer()
                 }
@@ -128,10 +127,10 @@ private func aspectFitRect(for imageSize: CGSize, in container: CGRect) -> CGRec
     guard imageSize.width > 0, imageSize.height > 0, container.width > 0, container.height > 0 else {
         return container
     }
-
+    
     let imageAspect = imageSize.width / imageSize.height
     let containerAspect = container.width / container.height
-
+    
     if imageAspect > containerAspect {
         let fittedHeight = container.width / imageAspect
         let originY = container.minY + (container.height - fittedHeight) / 2
@@ -152,7 +151,7 @@ private enum RectConversion {
         let height = viewRect.height / bounds.height
         return clampNormalizedRect(CGRect(x: x, y: y, width: width, height: height))
     }
-
+    
     static func viewRect(from normalizedRect: CGRect, in bounds: CGRect) -> CGRect {
         CGRect(
             x: bounds.minX + normalizedRect.minX * bounds.width,
@@ -176,38 +175,76 @@ private func clampNormalizedRect(_ rect: CGRect) -> CGRect {
 private struct BoundingBoxOverlay: View {
     @Binding var normalizedRect: CGRect
     let bounds: CGRect
-    let isLocked: Bool
-
-    @State private var initialRect: CGRect = .zero
-
+    let isVisible: Bool
+    
+    @State private var dragStartRect: CGRect = .zero
+    @State private var resizeStartRect: CGRect = .zero
+    
+    private let minimumNormalizedSize: CGFloat = 0.12
+    private let handleSize: CGFloat = 24
+    
     var body: some View {
-        let viewRect = RectConversion.viewRect(from: normalizedRect, in: bounds)
-
-        RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(isLocked ? Color.gray.opacity(0.8) : Color.white, style: StrokeStyle(lineWidth: 2, dash: isLocked ? [8, 5] : []))
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.12))
-            )
-            .frame(width: viewRect.width, height: viewRect.height)
+        if !isVisible {
+            EmptyView()
+        } else {
+            let viewRect = RectConversion.viewRect(from: normalizedRect, in: bounds)
+            
+            ZStack(alignment: .bottomTrailing) {
+                Rectangle()
+                    .strokeBorder(Color.white, lineWidth: 2)
+                    .background(
+                        Rectangle()
+                            .fill(Color.black.opacity(0.08))
+                    )
+                    .frame(width: viewRect.width, height: viewRect.height)
+                    .shadow(color: .white.opacity(0.35), radius: 4)
+                
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: handleSize, height: handleSize)
+                    .shadow(color: .black.opacity(0.35), radius: 2)
+                    .offset(x: handleSize * 0.25, y: handleSize * 0.25)
+                    .gesture(resizeGesture(viewRect: viewRect))
+                    .accessibilityLabel("Resize bounding box")
+            }
             .position(x: viewRect.midX, y: viewRect.midY)
-            .shadow(color: isLocked ? .black.opacity(0.5) : .white.opacity(0.4), radius: 6)
-            .gesture(dragGesture(viewRect: viewRect), including: isLocked ? .none : .all)
-            .animation(.easeInOut(duration: 0.2), value: isLocked)
-            .accessibilityLabel(isLocked ? "Bounding box locked" : "Bounding box unlocked")
+            .gesture(dragGesture(viewRect: viewRect))
+            .accessibilityLabel("Bounding box")
+        }
     }
-
+    
     private func dragGesture(viewRect: CGRect) -> some Gesture {
         DragGesture()
             .onChanged { value in
-                if initialRect == .zero { initialRect = viewRect }
-                let translated = initialRect.offsetBy(dx: value.translation.width, dy: value.translation.height)
+                if dragStartRect == .zero { dragStartRect = viewRect }
+                let translated = dragStartRect.offsetBy(dx: value.translation.width, dy: value.translation.height)
                 let clamped = clampMovingRect(translated, to: bounds)
                 normalizedRect = RectConversion.normalizedRect(from: clamped, in: bounds)
             }
             .onEnded { _ in
-                initialRect = .zero
+                dragStartRect = .zero
             }
+    }
+    
+    private func resizeGesture(viewRect: CGRect) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                if resizeStartRect == .zero { resizeStartRect = viewRect }
+                
+                let minWidth = bounds.width * minimumNormalizedSize
+                let minHeight = bounds.height * minimumNormalizedSize
+                
+                var nextWidth = resizeStartRect.width + value.translation.width
+                var nextHeight = resizeStartRect.height + value.translation.height
+                
+                nextWidth = max(minWidth, min(nextWidth, bounds.maxX - resizeStartRect.minX))
+                nextHeight = max(minHeight, min(nextHeight, bounds.maxY - resizeStartRect.minY))
+                
+                let resized = CGRect(x: resizeStartRect.minX, y: resizeStartRect.minY, width: nextWidth, height: nextHeight)
+                normalizedRect = RectConversion.normalizedRect(from: resized, in: bounds)
+            }
+            .onEnded { _ in
+                resizeStartRect = .zero            }
     }
 }
 

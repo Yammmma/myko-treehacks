@@ -20,7 +20,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     @Published var annotatedImage: UIImage? = nil
     var onCapture: ((UIImage) -> Void)?
     @Published var boundingBoxNormalized: CGRect = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
-    @Published var isBoundingBoxLocked = true
+    @Published var isBoundingBoxVisible = false
     
     // --- Camera Properties ---
     private let session = AVCaptureSession()
@@ -71,7 +71,7 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
     func captureImage(mode: CaptureMode, prompt: String? = nil) {
         requestSnapshot { [self] image in
             guard let img = image else { return }
-            let analysisImage = imageCroppedToBoundingBox(from: img)
+            let analysisImage = imageWithBoundingBoxOverlay(from: img)
             
             DispatchQueue.main.async {
                 self.capturedImage = img
@@ -95,9 +95,9 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         }
     }
     
-    func toggleBoundingBoxLock() {
+    func toggleBoundingBoxVisibility() {
         DispatchQueue.main.async {
-            self.isBoundingBoxLocked.toggle()
+            self.isBoundingBoxVisible.toggle()
         }
     }
     
@@ -290,32 +290,42 @@ final class EndpointViewModel: NSObject, ObservableObject, AVCaptureVideoDataOut
         return context.makeImage()
     }
     
-    private func imageCroppedToBoundingBox(from image: UIImage) -> UIImage {
-        guard let cgImage = image.cgImage else { return image }
-
+    private func imageWithBoundingBoxOverlay(from image: UIImage) -> UIImage {
         let normalizedRect: CGRect
+        let isVisible: Bool
         if Thread.isMainThread {
             normalizedRect = self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            isVisible = self.isBoundingBoxVisible
         } else {
-            normalizedRect = DispatchQueue.main.sync {
-                self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            (normalizedRect, isVisible) = DispatchQueue.main.sync {
+                (
+                    self.boundingBoxNormalized.clamped(to: CGRect(x: 0, y: 0, width: 1, height: 1)),
+                    self.isBoundingBoxVisible
+                )
             }
         }
 
-        let cropRect = CGRect(
-            x: normalizedRect.minX * CGFloat(cgImage.width),
-            y: normalizedRect.minY * CGFloat(cgImage.height),
-            width: normalizedRect.width * CGFloat(cgImage.width),
-            height: normalizedRect.height * CGFloat(cgImage.height)
-        ).integral
+        guard isVisible else { return image }
 
-        guard cropRect.width > 1,
-              cropRect.height > 1,
-              let cropped = cgImage.cropping(to: cropRect) else {
-            return image
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+
+            let strokeRect = CGRect(
+                x: normalizedRect.minX * image.size.width,
+                y: normalizedRect.minY * image.size.height,
+                width: normalizedRect.width * image.size.width,
+                height: normalizedRect.height * image.size.height
+            ).integral
+
+            let path = UIBezierPath(rect: strokeRect)
+            UIColor.black.withAlphaComponent(0.08).setFill()
+            path.fill()
+
+            UIColor.white.setStroke()
+            path.lineWidth = 4
+            path.stroke()
         }
-
-        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
