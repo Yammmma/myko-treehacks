@@ -103,10 +103,13 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
     }
 
     private func startRecognitionTask(onTranscriptUpdate: @escaping (String) -> Void) {
+        recognizerTask?.cancel()
+
+        guard let transcriber else { return }
+        let results = transcriber.results
         recognizerTask = Task {
-            guard let transcriber else { return }
             do {
-                for try await result in transcriber.results {
+                for try await result in results {
                     let text = String(result.text.characters)
                     if result.isFinal {
                         finalizedTranscript += text
@@ -144,6 +147,7 @@ final class SpeechAnalyzerTranscriptionService: ObservableObject {
 
     private func resetRecordingPipeline() async {
         recognizerTask?.cancel()
+        await recognizerTask?.value
         recognizerTask = nil
 
         if audioEngine.isRunning {

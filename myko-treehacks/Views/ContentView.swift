@@ -13,10 +13,10 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appState: AppState
     @StateObject private var chat = ChatViewModel()
-    @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
+//    @StateObject private var transcriptionService = SpeechAnalyzerTranscriptionService()
     @StateObject private var handsFreeController = HandsFreeModeController()
     
-    @State private var transcriptionError: String?
+//    @State private var transcriptionError: String?
     @State private var captureError: String?
     @State private var showSavedToast = false
     @State private var captureTrigger = 0
@@ -160,11 +160,11 @@ struct ContentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
-            Button("OK") { transcriptionError = nil }
-        }, message: {
-            Text(transcriptionError ?? "Unknown error")
-        })
+//        .alert("Transcription Failed", isPresented: .constant(transcriptionError != nil), actions: {
+//            Button("OK") { transcriptionError = nil }
+//        }, message: {
+//            Text(transcriptionError ?? "Unknown error")
+//        })
         .alert("Save Failed", isPresented: .constant(captureError != nil), actions: {
             Button("OK") { captureError = nil }
         }, message: {
@@ -195,12 +195,12 @@ struct ContentView: View {
         }
     }
     
-    @MainActor
-    private func toggleRecording() async {
-        if handsFreeEnabled {
-            handsFreeEnabled = false
-            await handsFreeController.stopAllListening()
-        }
+//    @MainActor
+//    private func toggleRecording() async {
+//        if handsFreeEnabled {
+//            handsFreeEnabled = false
+//            await handsFreeController.stopAllListening()
+//        }
 //        if transcriptionService.isRecording {
 //            await transcriptionService.stopRecording()
 //            return
@@ -215,7 +215,7 @@ struct ContentView: View {
 //        } catch {
 //            transcriptionError = error.localizedDescription
 //        }
-    }
+//    }
     
     @MainActor
     private func updateHandsFreeDraft(_ transcript: String) {
